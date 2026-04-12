@@ -4,6 +4,29 @@ const prisma = new PrismaClient();
 
 export default prisma;
 
+async function resolveDepartmentFields(data: any) {
+  const departmentId =
+    data?.departmentId ||
+    data?.department?.connect?.id ||
+    undefined;
+
+  if (!departmentId) {
+    return {
+      departmentId: undefined,
+      departmentName: data?.departmentName || undefined,
+    };
+  }
+
+  const department = await prisma.department.findUnique({
+    where: { id: departmentId },
+  });
+
+  return {
+    departmentId,
+    departmentName: data?.departmentName || department?.name || undefined,
+  };
+}
+
 // 创建学生
 export  async function createStudent(student: any) {
   return prisma.student.create({
@@ -81,8 +104,16 @@ export async function getStudentCourses(studentId: string) {
 
 //创建老师
 export async function createTeacher(teacher: any) {
+  const { departmentId, departmentName } = await resolveDepartmentFields(teacher);
+
   return prisma.teacher.create({
-    data: teacher,
+    data: {
+      ...teacher,
+      department: undefined,
+      departmentId,
+      departmentName,
+      email: teacher.email || `${teacher.teacherId}@teacher.classsight.local`,
+    },
   });
 }
 
@@ -115,11 +146,18 @@ export async function getTeacherById(teacherId: string) {
 
 //修改老师信息
 export async function updateTeacher(teacherId: string, data: any) {
+  const { departmentId, departmentName } = await resolveDepartmentFields(data);
+
   return prisma.teacher.update({
     where: {
       teacherId,
     },
-    data: data,
+    data: {
+      ...data,
+      department: undefined,
+      departmentId,
+      departmentName,
+    },
   });
 }
 

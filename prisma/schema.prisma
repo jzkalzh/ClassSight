@@ -32,7 +32,7 @@ model Student {
   password       String        @db.VarChar(100)
   role           Int           @default(0)
   name           String        @db.VarChar(50) @default("")
-  departmentId   String        @default("")
+  departmentId   String?       @db.VarChar(255)
   department     Department?   @relation(fields: [departmentId], references: [id])
   major          String        @db.VarChar(100) @default("") // 将major改为字符串类型
   grade          String        @db.VarChar(20) @default("")
@@ -42,8 +42,10 @@ model Student {
   enrollmentDate DateTime      @default(now())
   status         String        @db.VarChar(20) @default("active") // active, suspended, graduated
   courseEnrollments CourseEnrollment[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  behaviorEvents   BehaviorEvent[]
+  sessionMetrics   StudentSessionMetric[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@map("students")
 }
@@ -54,7 +56,7 @@ model Teacher {
   password       String        @db.VarChar(100)
   role           Int           @default(1)
   name           String        @db.VarChar(50) @default("")
-  departmentId   String        @default("")
+  departmentId   String?       @db.VarChar(255)
   departmentName String        @default("")
   department     Department?   @relation(fields: [departmentId], references: [id])
   major          String        @db.VarChar(100) @default("") // 将majors改为字符串类型
@@ -89,9 +91,9 @@ model Course {
   id          String            @id @unique @default(uuid()) @db.VarChar(255)
   name        String            @db.VarChar(100) @default("")
   code        String            @unique @db.VarChar(20) @default("")
-  teacherId   String            @default("")
+  teacherId   String?           @db.VarChar(20)
   teacher     Teacher?          @relation(fields: [teacherId], references: [teacherId])
-  departmentId String           @default("")
+  departmentId String?          @db.VarChar(255)
   department  Department?       @relation(fields: [departmentId], references: [id])
   type        String            @db.VarChar(50) @default("专业课程") // 新增：课程类型
   credits     Int               @default(0)
@@ -100,8 +102,9 @@ model Course {
   schedule    Json?             // 存储课程安排信息
   studentCount Int              @default(0)
   courseEnrollments CourseEnrollment[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  inferenceSessions InferenceSession[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   @@map("courses")
 }
@@ -109,13 +112,112 @@ model Course {
 // 课程选修关系模型
 model CourseEnrollment {
   id        String   @id @default(uuid())
-  studentId String   @default("")
+  studentId String   @db.VarChar(20)
   student   Student? @relation(fields: [studentId], references: [studentId])
-  courseId  String   @default("")
+  courseId  String   @db.VarChar(255)
   course    Course?  @relation(fields: [courseId], references: [id])
   enrolledAt DateTime @default(now())
   status    String   @db.VarChar(20) @default("enrolled") // enrolled, dropped, completed
 
   @@unique([studentId, courseId])
   @@map("course_enrollments")
+}
+
+model EdgeDevice {
+  id         String             @id @default(uuid()) @db.VarChar(255)
+  name       String             @db.VarChar(100)
+  deviceKey  String             @unique @db.VarChar(255)
+  location   String?            @db.VarChar(255)
+  status     String             @db.VarChar(20) @default("active") // active, offline, disabled
+  lastSeenAt DateTime?
+  metadata   Json?
+  sessions   InferenceSession[]
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@map("edge_devices")
+}
+
+model InferenceSession {
+  id             String               @id @default(uuid()) @db.VarChar(255)
+  deviceId       String               @db.VarChar(255)
+  device         EdgeDevice           @relation(fields: [deviceId], references: [id])
+  courseId       String?              @db.VarChar(255)
+  course         Course?              @relation(fields: [courseId], references: [id])
+  classroom      String?              @db.VarChar(100)
+  sourceStream   String?              @db.VarChar(255)
+  status         String               @db.VarChar(20) @default("running") // running, completed, failed
+  startedAt      DateTime             @default(now())
+  endedAt        DateTime?
+  metadata       Json?
+  behaviorEvents BehaviorEvent[]
+  studentMetrics StudentSessionMetric[]
+  classMetric    ClassSessionMetric?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([deviceId, status])
+  @@index([courseId, startedAt])
+  @@map("inference_sessions")
+}
+
+model BehaviorEvent {
+  id           String            @id @default(uuid()) @db.VarChar(255)
+  sessionId    String            @db.VarChar(255)
+  session      InferenceSession  @relation(fields: [sessionId], references: [id])
+  studentId    String?           @db.VarChar(20)
+  student      Student?          @relation(fields: [studentId], references: [studentId])
+  trackerId    String?           @db.VarChar(100)
+  behaviorType String            @db.VarChar(50) // attendance, look_up, focus, hand_raise, stand_up
+  confidence   Float?
+  frameTs      DateTime
+  durationMs   Int?
+  bbox         Json?
+  attributes   Json?
+  createdAt    DateTime          @default(now())
+
+  @@index([sessionId, frameTs])
+  @@index([studentId, frameTs])
+  @@index([behaviorType, frameTs])
+  @@map("behavior_events")
+}
+
+model StudentSessionMetric {
+  id                 String            @id @default(uuid()) @db.VarChar(255)
+  sessionId          String            @db.VarChar(255)
+  session            InferenceSession  @relation(fields: [sessionId], references: [id])
+  metricKey          String            @db.VarChar(150)
+  studentId          String?           @db.VarChar(20)
+  student            Student?          @relation(fields: [studentId], references: [studentId])
+  trackerId          String?           @db.VarChar(100)
+  displayName        String?           @db.VarChar(100)
+  attendanceRate     Float             @default(0)
+  lookUpRate         Float             @default(0)
+  focusLevel         Float             @default(0)
+  participationCount Int               @default(0)
+  score              Float             @default(0)
+  rawSummary         Json?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([sessionId])
+  @@index([studentId])
+  @@unique([sessionId, metricKey])
+  @@map("student_session_metrics")
+}
+
+model ClassSessionMetric {
+  id                    String            @id @default(uuid()) @db.VarChar(255)
+  sessionId             String            @unique @db.VarChar(255)
+  session               InferenceSession  @relation(fields: [sessionId], references: [id])
+  avgAttendance         Float             @default(0)
+  avgLookUpRate         Float             @default(0)
+  avgFocusLevel         Float             @default(0)
+  avgParticipationCount Float             @default(0)
+  totalStudents         Int               @default(0)
+  distribution          Json?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@map("class_session_metrics")
 }

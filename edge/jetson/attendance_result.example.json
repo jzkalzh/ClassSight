@@ -1,0 +1,16 @@
+{
+  "students": [
+    {
+      "studentId": "20230001",
+      "displayName": "张三",
+      "confidence": 0.98,
+      "source": "face-recognition"
+    },
+    {
+      "studentId": "20230002",
+      "displayName": "李四",
+      "confidence": 0.95,
+      "source": "face-recognition"
+    }
+  ]
+}

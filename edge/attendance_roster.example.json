@@ -1,0 +1,10 @@
+{
+  "student-001": {
+    "studentId": "20230001",
+    "displayName": "学生1"
+  },
+  "student-002": {
+    "studentId": "20230002",
+    "displayName": "学生2"
+  }
+}

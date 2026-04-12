@@ -1,47 +1,145 @@
 # ClassSight
 
------一个课堂行为洞察系统
+课堂行为洞察系统（Web + Edge）。
 
+本项目包含：
+- Web 端（Next.js）
+- 数据层（Prisma + PostgreSQL）
+- 边缘设备上报（Jetson/Python）
 
+## 1. 环境要求
 
-## 简介：
+- Windows 10/11（开发机）
+- Node.js `20+`
+- Docker Desktop（用于 PostgreSQL）
+- Git
+- 可选：Python `3.10+`（本机调试边缘脚本）
 
-  和一个朋友一起做的大创项目，他主要负责实体设备以及对应模型，由于缺了个对应的搞开发的，所以拉上了我。我就受邀来进行这个项目前端后端的开发了。目前只考虑web端，未来时间如果有空余我也有可能实现客户端。项目正如其名，是一个类似学习通的系统，不过是plus版的，将会和我朋友的”小黑盒“结合，通过摄像设备和大模型来进行课堂上学生考勤数据、专注度、举手次数等等数据的统计和展示。目前我的项目和他的模型都正在开发中，所以先写下这个文章作为一个整体的概览。（希望这样的系统永远不会上线把，想我这样经常旷课的人绝对和这样的系统水火不容啊，虽然作为了这个cs项目的开发者但我还是觉得这玩意实在太恐怖了Σヽ(ﾟД ﾟ; )ﾉ）
+## 2. 拉取与安装
 
+```powershell
+cd G:\codex_test
+git clone <你的仓库地址> ClassSight
+cd G:\codex_test\ClassSight
+npm ci
+```
 
+## 3. 启动 PostgreSQL（Docker）
 
-## 项目概览
+```powershell
+docker run -d --name classsight-pg `
+  -e POSTGRES_PASSWORD=123456 `
+  -e POSTGRES_USER=postgres `
+  -e POSTGRES_DB=postgres `
+  -p 5432:5432 `
+  postgres:17
+```
 
-- 项目主要使用nextjs作为前后端的开发框架
-- 使用prisma + postgres sql来构建和控制数据库
-- 预计使用ssh2 promise来进行和小黑盒的数据交互
-- 使用docker来部署到现有的实体服务器上
-- 之后使用的其他第三方库会慢慢添加上来
+检查容器状态：
 
+```powershell
+docker ps
+```
 
+## 4. 配置环境变量
 
-## 项目结构
+在项目根目录创建 `.env`，至少包含：
 
-- 分为学生、教师、管理员三端
-  - 学生通过该系统来查看自己所选的课程以及相应课程老师、上课时间以及自己的课堂表现
-  - 老师通过该系统来查看自己所教的课程以及相应课程学生、上课时间以及学生们的课堂表现
-  - 管理员来进行相应重要数据的管理和创建
-- 一般数据直接通过简单前后端的交互添加进数据库中，部分课堂表现数据得通过”小黑盒“设备通过ssh连接传输给服务器由后端处理
+```env
+DATABASE_URL=postgresql://postgres:123456@127.0.0.1:5432/postgres?schema=public
+AUTH_SECRET=请替换成你自己的长随机字符串
+```
 
+可用以下命令生成随机 `AUTH_SECRET`（PowerShell）：
 
+```powershell
+[guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
+```
 
-## 项目难点
+## 5. 初始化数据库
 
-个人认为项目在开发过程中可能会遇到的卡点
+```powershell
+npm run prisma:generate
+npx prisma migrate deploy
+```
 
-- 服务器端和”小黑盒“设备的交互 
-- 项目的部署以及正常运行（个人缺乏相关经验）
-- 部分数据传输的及时性，会有频繁的请求以及web测的刷新，会很影响性能
+## 6. 导入模拟数据（课程/学生/课堂表现）
 
+```powershell
+node .\scripts\seed-simulated-classroom.js
+```
 
+当前脚本默认会导入较大规模数据（每位教师约 36 名学生，含课程、选课、课堂会话和行为指标）。
 
+## 7. 启动项目
 
+```powershell
+npm run dev -- --hostname 0.0.0.0 --port 3000
+```
 
-## 后记
+访问：
 
-  能被朋友邀请来开发这个项目实在是不胜惶恐，希望这个项目开发过程顺利，也希望我的朋友能通过这个项目得到不错的收获，发出不错的论文！
+- 本机：`http://localhost:3000`
+- 局域网设备：`http://<你的电脑IP>:3000`
+
+## 8. 主要页面
+
+- 教师首页：`/home/teacher`
+- 教师课程：`/home/teacher/courses`
+- 教师日历：`/home/teacher/calendar`
+- 教师资料（可编辑）：`/home/teacher/profile`
+- 课堂表现详情：`/home/performance/course/<courseId>`
+
+## 9. 边缘端（Jetson）说明
+
+Jetson 兼容脚本目录：
+
+- `edge/jetson`
+
+常用流程：
+
+```bash
+cd /home/lzh/classsight-edge-jetson
+source .venv/bin/activate
+python attendance_report_py36.py
+```
+
+确保以下条件成立：
+- Web 服务可从 Jetson 访问（`http://<PC-IP>:3000`）
+- `.env` 中配置了正确的 `API_BASE_URL` 和 `DEVICE_KEY`
+- 识别结果文件存在并格式正确（`attendance_result.json`）
+
+## 10. 常见问题
+
+### 10.1 登录后欢迎语不正确
+
+- 确认已完成最近代码更新（已包含 `app/api/auth/[...nextauth]/route.ts`）
+- 修改资料后刷新页面，必要时重启 `npm run dev`
+
+### 10.2 教师课程安排显示为 JSON 字符串
+
+- 已在后端做兼容解析（字符串化 JSON -> 可读排课文本）
+- 若仍出现，检查数据库中 `course.schedule` 是否为有效 JSON
+
+### 10.3 Jetson 无法访问接口（超时）
+
+1. 前端需绑定 `0.0.0.0`
+2. 放行 Windows 防火墙 `3000` 端口
+3. Jetson 上先 `curl http://<PC-IP>:3000` 验证连通
+
+## 11. 开发命令
+
+```powershell
+# 代码检查
+npm run lint
+
+# 生成 Prisma Client
+npm run prisma:generate
+
+# 执行迁移
+npx prisma migrate deploy
+```
+
+---
+
+如果你需要，我可以继续补一份 `README-DEPLOY.md`（生产部署版，含 Nginx、PM2、HTTPS、日志与备份策略）。

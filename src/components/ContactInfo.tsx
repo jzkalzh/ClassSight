@@ -1,5 +1,5 @@
-import React from 'react';
-import { Mail, Phone, MapPin } from 'lucide-react';
+import React from "react";
+import { Mail, MapPin, Phone } from "lucide-react";
 
 interface ContactInfoProps {
   email: string;
@@ -9,20 +9,20 @@ interface ContactInfoProps {
 
 const ContactInfo: React.FC<ContactInfoProps> = ({ email, phone, office }) => {
   return (
-    <div className="bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-md p-6">
-      <h3 className="text-lg font-semibold mb-4">联系方式</h3>
+    <div className="rounded-xl bg-white p-6 shadow-md dark:bg-[oklch(0.205_0_0)]">
+      <h3 className="mb-4 text-lg font-semibold">联系方式</h3>
       <div className="space-y-3">
         <div className="flex items-center">
-          <Mail className="h-5 w-5 text-gray-400 mr-3" />
-          <span>{email}</span>
+          <Mail className="mr-3 h-5 w-5 text-gray-400" />
+          <span>{email || "未设置邮箱"}</span>
         </div>
         <div className="flex items-center">
-          <Phone className="h-5 w-5 text-gray-400 mr-3" />
-          <span>{phone}</span>
+          <Phone className="mr-3 h-5 w-5 text-gray-400" />
+          <span>{phone || "未设置电话"}</span>
         </div>
         <div className="flex items-center">
-          <MapPin className="h-5 w-5 text-gray-400 mr-3" />
-          <span>{office}</span>
+          <MapPin className="mr-3 h-5 w-5 text-gray-400" />
+          <span>{office || "未设置办公室"}</span>
         </div>
       </div>
     </div>

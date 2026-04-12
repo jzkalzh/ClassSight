@@ -3,9 +3,9 @@
 import React from "react";
 import {
   NavigationMenu,
+  NavigationMenuLink,
   NavigationMenuItem,
   NavigationMenuList,
-  NavigationMenuTrigger,
 } from "@radix-ui/react-navigation-menu";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -123,7 +123,7 @@ const StudentNavigation: React.FC<StudentNavigationProps> = ({ role }) => {
         <NavigationMenuList className="flex bg-white dark:bg-[oklch(0.205_0_0)] shadow-lg rounded-full p-1">
           {navItems.map((item) => (
             <NavigationMenuItem key={item.href}>
-              <NavigationMenuTrigger asChild>
+              <NavigationMenuLink asChild>
                 <Link
                   href={item.href}
                   className={cn(
@@ -135,7 +135,7 @@ const StudentNavigation: React.FC<StudentNavigationProps> = ({ role }) => {
                   {item.icon}
                   <span>{item.label}</span>
                 </Link>
-              </NavigationMenuTrigger>
+              </NavigationMenuLink>
             </NavigationMenuItem>
           ))}
         </NavigationMenuList>

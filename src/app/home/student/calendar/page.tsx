@@ -1,144 +1,229 @@
 "use client";
 
-import React, { useState } from 'react';
-import PageHeader from '@/components/PageHeader';
-import PageFooter from '@/components/PageFooter';
-import StudentNavigation from '@/components/StudentNavigation';
-import TodayEventsList from '@/components/TodayEventsList';
-import { EventItem } from '@/components/TodayEventsList';
-import { Calendar } from '@/components/ui/calendar';
+import React, { useEffect, useMemo, useState } from "react";
+import PageHeader from "@/components/PageHeader";
+import PageFooter from "@/components/PageFooter";
+import StudentNavigation from "@/components/StudentNavigation";
+import TodayEventsList from "@/components/TodayEventsList";
+import { EventItem } from "@/components/TodayEventsList";
+import { Calendar } from "@/components/ui/calendar";
+import { AlertCircle, CalendarDays, Clock3 } from "lucide-react";
+
+type StudentCourse = {
+  id: string;
+  name: string;
+  teacherName: string;
+  scheduleLabel: string;
+  location: string;
+  status: "pending" | "completed" | "in-progress";
+};
+
+type StudentDashboardData = {
+  courses: StudentCourse[];
+};
+
+const weekdayMap: Record<string, number> = {
+  周日: 0,
+  周天: 0,
+  周一: 1,
+  周二: 2,
+  周三: 3,
+  周四: 4,
+  周五: 5,
+  周六: 6,
+};
+
+function normalizeDate(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function formatDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseScheduleLabel(scheduleLabel: string) {
+  const [day, ...rest] = scheduleLabel.trim().split(/\s+/);
+  const time = rest.join(" ").trim() || "待排课";
+  return { day, time };
+}
+
+function mapCourseStatusToEventStatus(status: StudentCourse["status"]): EventItem["status"] {
+  if (status === "completed") return "completed";
+  if (status === "in-progress") return "ongoing";
+  return "pending";
+}
+
+function buildEventsByDate(courses: StudentCourse[], month: Date) {
+  const map: Record<string, EventItem[]> = {};
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(year, monthIndex, day);
+    const weekday = date.getDay();
+    const key = formatDateKey(date);
+    const events: EventItem[] = [];
+
+    for (const course of courses) {
+      const parsed = parseScheduleLabel(course.scheduleLabel);
+      const scheduleWeekday = weekdayMap[parsed.day];
+
+      if (scheduleWeekday === undefined || scheduleWeekday !== weekday) {
+        continue;
+      }
+
+      events.push({
+        id: `${course.id}-${key}`,
+        title: course.name,
+        teacher: course.teacherName,
+        time: parsed.time,
+        location: course.location,
+        status: mapCourseStatusToEventStatus(course.status),
+      });
+    }
+
+    if (events.length) {
+      map[key] = events;
+    }
+  }
+
+  return map;
+}
 
 const StudentCalendarPage: React.FC = () => {
-  // 跟踪选中的日期
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  
-  // 模拟课程数据，包含不同日期的课程
-  const courseData: Record<string, EventItem[]> = {
-    // 今天的日期作为键（格式：YYYY-MM-DD）
-    "2025-10-13": [
-      {
-        id: "1",
-        title: "高等数学",
-        teacher: "李老师",
-        time: "08:00-10:00",
-        status: "completed",
-        iconColor: "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300"
-      },
-      {
-        id: "2",
-        title: "大学物理",
-        teacher: "张老师",
-        time: "14:00-16:00",
-        status: "pending",
-        iconColor: "bg-yellow-100 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-300"
+  const [selectedDate, setSelectedDate] = useState<Date>(normalizeDate(new Date()));
+  const [currentMonth, setCurrentMonth] = useState<Date>(normalizeDate(new Date()));
+  const [courses, setCourses] = useState<StudentCourse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch("/api/student/dashboard", {
+          credentials: "include",
+        });
+        const result = (await response.json()) as { data?: StudentDashboardData; error?: string };
+
+        if (!response.ok) {
+          throw new Error(result?.error || "加载课程数据失败");
+        }
+
+        setCourses(result.data?.courses ?? []);
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "加载课程数据失败");
+      } finally {
+        setLoading(false);
       }
-    ],
-    // 其他日期的课程示例
-    "2025-10-11": [
-      {
-        id: "3",
-        title: "线性代数",
-        teacher: "王老师",
-        time: "09:00-11:00",
-        status: "completed",
-        iconColor: "bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300"
-      }
-    ],
-    "2025-10-12": [
-      {
-        id: "4",
-        title: "计算机基础",
-        teacher: "赵老师",
-        time: "13:30-15:30",
-        status: "ongoing",
-        iconColor: "bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300"
-      }
-    ]
-  };
+    };
 
-  // 根据选中的日期获取对应的课程
-  const getEventsForDate = (date: Date) => {
-    // 修复时区问题，确保使用本地日期而非UTC日期
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const dateKey = `${year}-${month}-${day}`;
-    
-    return courseData[dateKey] || [];
-  };
+    void load();
+  }, []);
 
-  // 处理日期选择变化
-  const handleDateChange = (date: Date | undefined) => {
-    if (date) {
-      setSelectedDate(date);
-    }
-  };
+  const eventsByDate = useMemo(
+    () => buildEventsByDate(courses, currentMonth),
+    [courses, currentMonth],
+  );
 
-  // 获取选中日期的事件
-  const selectedDateEvents = getEventsForDate(selectedDate);
+  const selectedDateEvents = useMemo(() => {
+    const key = formatDateKey(selectedDate);
+    return eventsByDate[key] ?? [];
+  }, [selectedDate, eventsByDate]);
 
-  // 格式化选中的日期为可读形式
-  const formatSelectedDate = (date: Date) => {
-    return date.toLocaleDateString('zh-CN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      weekday: 'long'
+  const courseDays = useMemo(
+    () => Object.keys(eventsByDate).map((dateKey) => new Date(`${dateKey}T00:00:00`)),
+    [eventsByDate],
+  );
+
+  const formatSelectedDate = (date: Date) =>
+    date.toLocaleDateString("zh-CN", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      weekday: "long",
     });
-  };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-[oklch(0.145_0_0)] text-gray-900 dark:text-white">
-      {/* 顶部导航 */}
+    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-[oklch(0.145_0_0)] dark:text-white">
       <PageHeader title="ClassSight" />
-
-      {/* 导航菜单 */}
       <StudentNavigation role={0} />
 
-      {/* 主要内容区域 - 水平布局 */}
       <main className="container mx-auto px-4 py-8">
-        <h2 className="text-2xl font-bold mb-6">学习日历</h2>
-        
-        {/* 水平布局容器 */}
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* 日历部分 - 左侧 */}
-          <div className="w-full lg:w-1/4">
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold">学习日历</h2>
+          <p className="mt-1 text-sm text-slate-500">按课程排期自动生成每月学习日程。</p>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/40">
             <Calendar
               mode="single"
               selected={selectedDate}
-              onSelect={handleDateChange}
-              className="rounded-md border shadow-sm"
+              onSelect={(date) => {
+                if (date) setSelectedDate(normalizeDate(date));
+              }}
+              month={currentMonth}
+              onMonthChange={(date) => setCurrentMonth(normalizeDate(date))}
+              modifiers={{
+                hasCourse: courseDays,
+              }}
+              modifiersClassNames={{
+                hasCourse: "bg-emerald-100 text-emerald-700 font-semibold dark:bg-emerald-900/40 dark:text-emerald-200",
+              }}
+              className="w-full rounded-md"
               captionLayout="dropdown"
             />
-          </div>
-          
-          {/* 课程列表部分 - 右侧 */}
-          <div className="w-full lg:w-3/4 bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-lg p-6 transition-all hover:shadow-xl">
-            <h3 className="text-lg font-semibold mb-4 flex items-center">
-              <span className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 mr-2">
-                {selectedDate.getDate()}
-              </span>
-              {formatSelectedDate(selectedDate)} 的课程
-            </h3>
-            
-            {selectedDateEvents.length > 0 ? (
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+              绿色日期表示当天有课程
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900/40">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="flex items-center gap-2 text-lg font-semibold">
+                <CalendarDays className="h-5 w-5 text-emerald-600" />
+                {formatSelectedDate(selectedDate)} 的课程
+              </h3>
+              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
+                <Clock3 className="h-3.5 w-3.5" />
+                共 {selectedDateEvents.length} 节
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="h-24 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+                ))}
+              </div>
+            ) : error ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-200">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  {error}
+                </div>
+              </div>
+            ) : selectedDateEvents.length ? (
               <TodayEventsList events={selectedDateEvents} />
             ) : (
-              <div className="text-gray-500 dark:text-gray-400 p-6 text-center border border-dashed border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800">
-                <svg className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                该日期没有安排课程
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
+                该日期没有课程安排。
               </div>
             )}
-          </div>
+          </section>
         </div>
       </main>
 
-      {/* 页脚 */}
       <PageFooter />
     </div>
   );
 };
 
 export default StudentCalendarPage;
+

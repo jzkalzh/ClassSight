@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 interface EditButtonProps {
   isEditing: boolean;
@@ -8,11 +8,11 @@ interface EditButtonProps {
 const EditButton: React.FC<EditButtonProps> = ({ isEditing, onToggleEdit }) => {
   return (
     <div className="flex justify-end">
-      <button 
+      <button
         onClick={onToggleEdit}
-        className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition duration-300 flex items-center"
+        className="flex items-center rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition duration-300 hover:bg-blue-700"
       >
-        {isEditing ? '保存' : '编辑资料'}
+        {isEditing ? "取消编辑" : "编辑资料"}
       </button>
     </div>
   );

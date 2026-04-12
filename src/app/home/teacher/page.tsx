@@ -1,4 +1,6 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useState } from "react";
 import StudentNavigation from "@/components/StudentNavigation";
 import PageHeader from "@/components/PageHeader";
 import PageFooter from "@/components/PageFooter";
@@ -7,44 +9,112 @@ import CurrentCourse from "@/components/CurrentCourse";
 import TodayCourses from "@/components/TodayCourses";
 import StudentPerformanceChart from "@/components/StudentPerformanceChart";
 
-const StudentHomePage: React.FC = () => {
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-[oklch(0.145_0_0)] text-gray-900 dark:text-white">
-      {/* 顶部导航 */}
-      <PageHeader />
+interface TeacherDashboardData {
+  teacher: {
+    id: string;
+    name: string;
+    departmentName: string;
+    rank: string;
+    courseCount: number;
+  };
+  courseOverview: {
+    currentCourse: {
+      id: string;
+      name: string;
+      code: string;
+      scheduleLabel: string;
+      location: string;
+      studentCount: number;
+      status: string;
+      statusLabel: string;
+    } | null;
+    todayCourses: Array<{
+      id: string;
+      name: string;
+      code: string;
+      scheduleLabel: string;
+      location: string;
+      studentCount: number;
+      status: "completed" | "pending" | "in-progress";
+      statusLabel: string;
+    }>;
+  };
+}
 
-      {/* 导航菜单 */}
+const TeacherHomePage: React.FC = () => {
+  const [data, setData] = useState<TeacherDashboardData | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const response = await fetch("/api/teacher/dashboard", {
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const result = await response.json();
+        setData(result.data);
+      } catch {
+        setData(null);
+      }
+    };
+
+    void load();
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-[oklch(0.145_0_0)] dark:text-white">
+      <PageHeader />
       <StudentNavigation role={1} />
 
-      {/* 主要内容区域 */}
       <main className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* 左侧面板 - 个人信息 */}
-          <TeacherProfileCard />
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          <TeacherProfileCard
+            teacherName={data?.teacher.name || "教师"}
+            teacherId={data?.teacher.id || ""}
+            collegeName={data?.teacher.departmentName || "未设置院系"}
+            rank={data?.teacher.rank || "教师"}
+            courseNumber={String(data?.teacher.courseCount || 0)}
+          />
 
-          {/* 中间面板 - 课程概览 */}
-          <div className="bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-md p-6 md:col-span-2">
-            <h2 className="text-xl font-bold mb-4">课程概览</h2>
+          <div className="rounded-xl bg-white p-6 shadow-md dark:bg-[oklch(0.205_0_0)] md:col-span-2">
+            <h2 className="mb-4 text-xl font-bold">课程概览</h2>
             <div className="space-y-4">
-              {/* 当前课程 */}
-              <CurrentCourse />
+              <CurrentCourse
+                courseName={data?.courseOverview.currentCourse?.name || "暂无课程"}
+                teacherName={data?.teacher.name || "教师"}
+                schedule={data?.courseOverview.currentCourse?.scheduleLabel || "待排课"}
+                location={data?.courseOverview.currentCourse?.location || "教室待定"}
+                statusLabel={data?.courseOverview.currentCourse?.statusLabel || "待采集"}
+              />
 
-              {/* 今日课程 */}
-              <TodayCourses />
+              <TodayCourses
+                courses={
+                  data?.courseOverview.todayCourses.map((course) => ({
+                    id: course.id,
+                    name: course.name,
+                    teacher: data?.teacher.name || "教师",
+                    time: course.scheduleLabel,
+                    location: course.location,
+                    status: course.status,
+                  })) || []
+                }
+              />
             </div>
           </div>
         </div>
 
-        {/* 学生表现 */}
         <div className="mt-6">
           <StudentPerformanceChart />
         </div>
       </main>
 
-      {/* 页脚 */}
       <PageFooter />
     </div>
   );
 };
 
-export default StudentHomePage;
+export default TeacherHomePage;
