@@ -1,4 +1,5 @@
 # ClassSight
+<<<<<<< HEAD
 
 课堂行为洞察系统（Web + Edge）。
 
@@ -143,3 +144,6 @@ npx prisma migrate deploy
 ---
 
 如果你需要，我可以继续补一份 `README-DEPLOY.md`（生产部署版，含 Nginx、PM2、HTTPS、日志与备份策略）。
+=======
+智慧课堂系统
+>>>>>>> d69a16e1e2c42a59f4688916c9ff4530a28b0da6
