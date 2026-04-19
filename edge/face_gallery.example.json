@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "studentId": "20230001",
+      "displayName": "Student 20230001",
+      "label": "student_20230001",
+      "embedding": [0.12, -0.33, 0.48, 0.07]
+    },
+    {
+      "studentId": "20230002",
+      "displayName": "Student 20230002",
+      "label": "student_20230002",
+      "embedding": [0.08, -0.27, 0.51, 0.03]
+    }
+  ]
+}

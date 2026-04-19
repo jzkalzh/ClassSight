@@ -1,0 +1,75 @@
+{
+  "events": [
+    {
+      "trackerId": "track-1",
+      "behaviorType": "look_up",
+      "confidence": 0.93,
+      "frameTs": "2026-04-19T07:30:00Z",
+      "bbox": {
+        "x1": 120,
+        "y1": 80,
+        "x2": 200,
+        "y2": 220
+      },
+      "attributes": {
+        "source": "yolo-behavior",
+        "displayName": "track-1"
+      }
+    },
+    {
+      "trackerId": "track-2",
+      "behaviorType": "hand_raise",
+      "confidence": 0.89,
+      "frameTs": "2026-04-19T07:30:01Z",
+      "bbox": {
+        "x1": 260,
+        "y1": 95,
+        "x2": 340,
+        "y2": 250
+      },
+      "attributes": {
+        "source": "yolo-behavior",
+        "displayName": "track-2"
+      }
+    }
+  ],
+  "studentMetrics": [
+    {
+      "trackerId": "track-1",
+      "displayName": "track-1",
+      "attendanceRate": 100,
+      "lookUpRate": 78,
+      "focusLevel": 66,
+      "participationCount": 1,
+      "rawSummary": {
+        "source": "behavior_json"
+      }
+    },
+    {
+      "trackerId": "track-2",
+      "displayName": "track-2",
+      "attendanceRate": 100,
+      "lookUpRate": 32,
+      "focusLevel": 71,
+      "participationCount": 3,
+      "rawSummary": {
+        "source": "behavior_json"
+      }
+    }
+  ],
+  "classMetric": {
+    "avgAttendance": 100,
+    "avgLookUpRate": 55,
+    "avgFocusLevel": 68.5,
+    "avgParticipationCount": 2,
+    "totalStudents": 2,
+    "distribution": {
+      "lookUpHigh": 1,
+      "focusHigh": 2
+    }
+  },
+  "metadata": {
+    "mode": "behavior",
+    "pipeline": "jetson-custom-model"
+  }
+}
