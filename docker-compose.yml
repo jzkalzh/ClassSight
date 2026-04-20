@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:17
+    container_name: classsight-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-classsight}
+      POSTGRES_USER: ${POSTGRES_USER:-classsight}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-db-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-classsight} -d ${POSTGRES_DB:-classsight}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: classsight-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-classsight}:${POSTGRES_PASSWORD:-change-this-db-password}@db:5432/${POSTGRES_DB:-classsight}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  postgres_data:

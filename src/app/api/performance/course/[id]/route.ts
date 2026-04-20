@@ -2,7 +2,7 @@ import { isLogin } from "@/utils/isLogin";
 import { getCoursePerformance } from "@/server/performance-service";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const loginStatus = await isLogin();
@@ -15,7 +15,9 @@ export async function GET(
 
   try {
     const { id } = await context.params;
-    const performance = await getCoursePerformance(id);
+    const { searchParams } = new URL(request.url);
+    const sessionId = searchParams.get("sessionId") || undefined;
+    const performance = await getCoursePerformance(id, sessionId);
 
     if (!performance) {
       return new Response(JSON.stringify({ error: "Course not found" }), {

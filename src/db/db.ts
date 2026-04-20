@@ -30,7 +30,10 @@ async function resolveDepartmentFields(data: any) {
 // 创建学生
 export  async function createStudent(student: any) {
   return prisma.student.create({
-    data: student,
+    data: {
+      ...student,
+      email: student.email || `${student.studentId}@student.classsight.local`,
+    },
   });
 }
 

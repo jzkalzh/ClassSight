@@ -1,0 +1,40 @@
+{
+  "pipelineName": "two_stage_face_attendance",
+  "detector": {
+    "recommendedModel": "RetinaFace-MobileNet0.25",
+    "deploymentFormat": "ONNX or TensorRT",
+    "reason": "Anchor-based detector with strong small-face recall and lightweight Jetson-friendly backbone",
+    "inputSize": [640, 640],
+    "confidenceThreshold": 0.35,
+    "iouThreshold": 0.5,
+    "anchors": {
+      "stride8": [8, 16, 24, 32],
+      "stride16": [48, 64, 96],
+      "stride32": [128, 192, 256]
+    }
+  },
+  "smallFaceEnhancement": {
+    "minFaceSize": 72,
+    "upscaleFactor": 2.0,
+    "clahe": true,
+    "sharpen": true,
+    "alignment": "five-point landmarks"
+  },
+  "recognizer": {
+    "recommendedModel": "MobileFaceNet-ArcFace",
+    "deploymentFormat": "ONNX or TensorRT",
+    "embeddingSize": 128,
+    "similarityMetric": "cosine",
+    "matchThreshold": 0.45,
+    "gallerySource": "local face feature library"
+  },
+  "runtime": {
+    "tracker": "ByteTrack or simple IoU track",
+    "reportMode": "attendance first",
+    "uploadApi": [
+      "/api/edge/session",
+      "/api/edge/events",
+      "/api/edge/session/{id}/close"
+    ]
+  }
+}

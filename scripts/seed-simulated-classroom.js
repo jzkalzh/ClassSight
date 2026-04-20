@@ -5,11 +5,13 @@ const prisma = new PrismaClient();
 
 const STUDENTS_PER_TEACHER = 36;
 const START_STUDENT_ID = 20231001;
+const SESSION_COUNT_PER_COURSE = 6;
+const SESSION_DURATION_MINUTES = 95;
 const DEMO_STUDENT = {
   studentId: "20239999",
   name: "Demo Student",
-  major: "浜哄伐鏅鸿兘",
-  class: "鏅虹2301",
+  major: "人工智能",
+  class: "智能2301",
   grade: "2023",
   email: "demo.student@classsight.local",
   password: "Demo@123",
@@ -18,15 +20,15 @@ const DEMO_STUDENT = {
 const departmentSeed = {
   code: "CS",
   name: "计算机与控制工程学院",
-  description: "用于智能课堂与课程面板演示的模拟院系",
+  description: "用于智能课堂与课程画像演示的模拟院系",
 };
 
 const namePool = [
-  "张晨", "李睿", "王浩", "赵宁", "陈远", "刘洋", "杨凡", "黄欣", "周航", "吴桐",
+  "张晨", "李睿", "王浩", "赵宁", "陈远", "刘洋", "杨凡", "黄欣", "周航", "吴楠",
   "徐泽", "孙悦", "马俊", "朱琳", "胡博", "郭宇", "何清", "高扬", "林瑞", "罗川",
-  "郑可", "梁轩", "谢南", "宋晨", "唐悦", "韩涛", "冯宇", "邓宁", "蔡涵", "彭晨",
-  "潘越", "袁帆", "于铭", "董博", "余航", "苏悦", "叶辰", "吕卓", "魏清", "蒋凡",
-  "田宇", "杜晨", "夏宁", "姜瑞", "崔航", "钟悦", "汪博", "陆宁", "任轩", "程悦",
+  "郑可", "梁越", "谢南", "宋晨", "唐悦", "韩淼", "冯宇", "邓宁", "蔡涵", "彭晨",
+  "潘越", "袁千", "于钰", "董博", "余航", "苏悦", "叶景", "吕卓", "魏清", "蒋凡",
+  "田宇", "杜晨", "夏宁", "姜瑞", "崔航", "钟悦", "汪博", "陆宁", "任越", "程悦",
 ];
 
 const majorPool = [
@@ -43,25 +45,25 @@ const courseTemplates = [
     credits: 3,
     description: "聚焦课堂行为识别、签到统计与教学反馈，是教师端总览的主展示课程。",
     schedule: { day: "周三", startTime: "08:00", endTime: "09:40", location: "A-206" },
-    sessionMode: "completed",
+    mode: "completed",
   },
   {
     suffix: "B",
     name: "边缘视觉实训",
     type: "实验课程",
     credits: 2,
-    description: "面向 Jetson Nano 与 YOLO 推理链路的实训课程，适合展示实时采集状态。",
+    description: "面向 Jetson Nano 与 YOLO 推理链路的实践课程，适合展示实时采集状态。",
     schedule: { day: "周四", startTime: "14:00", endTime: "15:40", location: "B-302" },
-    sessionMode: "running",
+    mode: "running",
   },
   {
     suffix: "C",
     name: "课堂数据洞察专题",
     type: "研讨课程",
     credits: 2,
-    description: "展示课程画像、风险学生识别与课堂节奏分析，默认保留为待接入状态。",
+    description: "展示课程画像、红黑榜、随堂练习与同类课对比。",
     schedule: { day: "周五", startTime: "10:00", endTime: "11:40", location: "C-105" },
-    sessionMode: "completed",
+    mode: "completed",
   },
 ];
 
@@ -76,6 +78,7 @@ function buildStudentSeeds(total) {
     const studentId = String(START_STUDENT_ID + index);
     const majorInfo = majorPool[index % majorPool.length];
     const classNo = (index % 3) + 1;
+
     return {
       studentId,
       name: pickName(index),
@@ -86,15 +89,28 @@ function buildStudentSeeds(total) {
   });
 }
 
-function calculateScore(metric) {
-  return Number(
-    (metric.attendanceRate * 0.3 + metric.lookUpRate * 0.4 + metric.focusLevel * 0.3).toFixed(2),
-  );
-}
-
 function average(values) {
   if (!values.length) return 0;
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2));
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function calculateScore(metric) {
+  if (Number(metric.attendanceRate) <= 0) {
+    return 0;
+  }
+
+  return Number(
+    (
+      metric.attendanceRate * 0.3 +
+      metric.lookUpRate * 0.2 +
+      metric.focusLevel * 0.35 +
+      Math.min(metric.participationCount * 12, 100) * 0.15
+    ).toFixed(2),
+  );
 }
 
 function buildDistribution(metrics) {
@@ -108,20 +124,41 @@ function buildDistribution(metrics) {
 
   for (const metric of metrics) {
     const bucket = buckets.find((item) => metric.lookUpRate >= item.min && metric.lookUpRate <= item.max);
-    if (bucket) bucket.value += 1;
+    if (bucket) {
+      bucket.value += 1;
+    }
   }
 
   return buckets.map(({ name, value }) => ({ name, value }));
 }
 
-function buildMetrics(studentSeeds, teacherIndex, templateIndex) {
+function buildMetrics(studentSeeds, teacherIndex, templateIndex, sessionIndex) {
+  const sessionDrift = sessionIndex * 2;
+
   return studentSeeds.map((student, index) => {
-    const attendanceRate = index % 11 === 0 ? 0 : 100;
-    const lookUpBase = 92 - (index % 20) * 2;
-    const focusBase = 88 - (index % 18) * 2;
-    const lookUpRate = Math.max(45, Math.min(100, lookUpBase - teacherIndex * 2 - templateIndex));
-    const focusLevel = Math.max(40, Math.min(100, focusBase - teacherIndex * 2 - templateIndex));
-    const participationCount = Math.max(1, 7 - (index % 6) + (templateIndex === 1 ? 1 : 0));
+    const isDemoStudent = student.studentId === DEMO_STUDENT.studentId;
+    const absentMod = 9 + ((teacherIndex + templateIndex + sessionIndex) % 4);
+    const attendanceRate = isDemoStudent ? 100 : index % absentMod === 0 ? 0 : 100;
+    const lookUpBase = 94 - (index % 14) * 2 - teacherIndex * 2 - templateIndex * 3 - sessionDrift;
+    const focusBase = 91 - (index % 13) * 2 - teacherIndex * 2 - templateIndex * 2 - sessionDrift;
+    const interactionBase = 6 - (index % 5) + (templateIndex === 1 ? 1 : 0) - Math.floor(sessionIndex / 2);
+
+    const isAbsent = attendanceRate <= 0;
+    const lookUpRate = isAbsent
+      ? 0
+      : isDemoStudent
+        ? clamp(88 - templateIndex * 3 - sessionIndex, 76, 95)
+        : clamp(lookUpBase, 45, 100);
+    const focusLevel = isAbsent
+      ? 0
+      : isDemoStudent
+        ? clamp(90 - templateIndex * 2 - sessionIndex, 80, 96)
+        : clamp(focusBase, 42, 100);
+    const participationCount = isAbsent
+      ? 0
+      : isDemoStudent
+        ? Math.max(3, 6 - templateIndex - Math.floor(sessionIndex / 2))
+        : Math.max(1, interactionBase);
 
     return {
       studentId: student.studentId,
@@ -324,16 +361,33 @@ async function clearSeededSessions(courseId) {
   });
 }
 
-async function createSessionBundle(course, device, teacherIndex, templateIndex, sessionMode, students) {
-  if (sessionMode === "pending") {
-    return null;
-  }
+function buildSessionPlan(mode) {
+  return Array.from({ length: SESSION_COUNT_PER_COURSE }).map((_, index) => {
+    if (mode === "running" && index === 0) {
+      return { index, status: "running" };
+    }
 
-  await clearSeededSessions(course.id);
+    return { index, status: "completed" };
+  });
+}
 
-  const now = Date.now();
-  const startedAt = new Date(now - (teacherIndex * 3 + templateIndex + 1) * 60 * 60 * 1000);
-  const endedAt = sessionMode === "completed" ? new Date(startedAt.getTime() + 95 * 60 * 1000) : null;
+async function createSessionRecord({
+  course,
+  device,
+  teacherIndex,
+  templateIndex,
+  sessionIndex,
+  status,
+  students,
+}) {
+  const baseDaysOffset = teacherIndex * 7 + templateIndex * 3 + sessionIndex;
+  const startedAt = new Date(Date.now() - baseDaysOffset * 24 * 60 * 60 * 1000);
+  startedAt.setHours(8 + ((templateIndex + sessionIndex) % 5) * 2, (sessionIndex * 7) % 60, 0, 0);
+
+  const endedAt =
+    status === "completed"
+      ? new Date(startedAt.getTime() + SESSION_DURATION_MINUTES * 60 * 1000)
+      : null;
   const classroom = course.schedule?.[0]?.location || "A-206";
 
   const session = await prisma.inferenceSession.create({
@@ -341,19 +395,21 @@ async function createSessionBundle(course, device, teacherIndex, templateIndex, 
       deviceId: device.id,
       courseId: course.id,
       classroom,
-      sourceStream: sessionMode === "running" ? "jetson-live-stream" : "simulation-camera",
-      status: sessionMode,
+      sourceStream: status === "running" ? "jetson-live-stream" : "simulation-camera",
+      status,
       startedAt,
       endedAt,
       metadata: {
         seeded: true,
         source: "seed-simulated-classroom",
-        mode: sessionMode,
+        sessionIndex,
+        templateIndex,
+        mode: status,
       },
     },
   });
 
-  const metrics = buildMetrics(students, teacherIndex, templateIndex);
+  const metrics = buildMetrics(students, teacherIndex, templateIndex, sessionIndex);
 
   for (const metric of metrics) {
     await prisma.studentSessionMetric.create({
@@ -369,6 +425,7 @@ async function createSessionBundle(course, device, teacherIndex, templateIndex, 
         score: calculateScore(metric),
         rawSummary: {
           seeded: true,
+          sessionIndex,
           templateIndex,
         },
       },
@@ -377,7 +434,7 @@ async function createSessionBundle(course, device, teacherIndex, templateIndex, 
 
   const eventTimeBase = startedAt.getTime() + 5 * 60 * 1000;
   const events = metrics.flatMap((metric, index) => {
-    const offset = index * 15 * 1000;
+    const offset = index * 11 * 1000;
     return [
       {
         sessionId: session.id,
@@ -387,7 +444,7 @@ async function createSessionBundle(course, device, teacherIndex, templateIndex, 
         confidence: metric.attendanceRate > 0 ? 0.98 : 0.4,
         frameTs: new Date(eventTimeBase + offset),
         durationMs: 1200,
-        attributes: { present: metric.attendanceRate > 0, seeded: true },
+        attributes: { present: metric.attendanceRate > 0, seeded: true, sessionIndex },
       },
       {
         sessionId: session.id,
@@ -397,7 +454,7 @@ async function createSessionBundle(course, device, teacherIndex, templateIndex, 
         confidence: 0.92,
         frameTs: new Date(eventTimeBase + offset + 7000),
         durationMs: 800,
-        attributes: { rate: metric.lookUpRate, seeded: true },
+        attributes: { rate: metric.lookUpRate, seeded: true, sessionIndex },
       },
       {
         sessionId: session.id,
@@ -407,7 +464,7 @@ async function createSessionBundle(course, device, teacherIndex, templateIndex, 
         confidence: 0.9,
         frameTs: new Date(eventTimeBase + offset + 12000),
         durationMs: 900,
-        attributes: { level: metric.focusLevel, seeded: true },
+        attributes: { level: metric.focusLevel, seeded: true, sessionIndex },
       },
     ];
   });
@@ -429,6 +486,28 @@ async function createSessionBundle(course, device, teacherIndex, templateIndex, 
   });
 
   return session;
+}
+
+async function createSessionBundles(course, device, teacherIndex, templateIndex, mode, students) {
+  await clearSeededSessions(course.id);
+
+  const sessions = [];
+  const plan = buildSessionPlan(mode);
+
+  for (const item of plan.reverse()) {
+    const session = await createSessionRecord({
+      course,
+      device,
+      teacherIndex,
+      templateIndex,
+      sessionIndex: item.index,
+      status: item.status,
+      students,
+    });
+    sessions.push(session);
+  }
+
+  return sessions.sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
 }
 
 async function main() {
@@ -459,13 +538,14 @@ async function main() {
         template,
         teacherStudents.length,
       );
+
       await ensureEnrollments(course.id, teacherStudents);
-      const session = await createSessionBundle(
+      const sessions = await createSessionBundles(
         course,
         device,
         teacherIndex,
         templateIndex,
-        template.sessionMode,
+        template.mode,
         teacherStudents,
       );
 
@@ -476,8 +556,9 @@ async function main() {
         courseCode: course.code,
         courseName: course.name,
         studentCount: teacherStudents.length,
-        sessionId: session?.id ?? null,
-        sessionMode: template.sessionMode,
+        sessionCount: sessions.length,
+        latestSessionId: sessions[0]?.id ?? null,
+        latestSessionStatus: sessions[0]?.status ?? null,
       });
     }
   }
@@ -485,10 +566,11 @@ async function main() {
   console.log(
     JSON.stringify(
       {
-        message: "Simulated classroom and teacher course data uploaded successfully.",
-        seededStudents: studentSeeds.length,
+        message: "Simulated classroom, sessions, and course analytics data seeded successfully.",
+        seededStudents: studentSeeds.length + 1,
         seededTeachers: teachers.length,
         seededCourses: summary.length,
+        sessionsPerCourse: SESSION_COUNT_PER_COURSE,
         studentsPerTeacher: STUDENTS_PER_TEACHER,
         summary,
       },

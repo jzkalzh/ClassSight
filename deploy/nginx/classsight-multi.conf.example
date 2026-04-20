@@ -1,0 +1,65 @@
+upstream classsight_teacher {
+    server 127.0.0.1:3000;
+}
+
+upstream classsight_student {
+    server 127.0.0.1:3001;
+}
+
+upstream classsight_admin {
+    server 127.0.0.1:3002;
+}
+
+server {
+    listen 80;
+    server_name teacher.example.com;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://classsight_teacher;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 80;
+    server_name student.example.com;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://classsight_student;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 80;
+    server_name admin.example.com;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://classsight_admin;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

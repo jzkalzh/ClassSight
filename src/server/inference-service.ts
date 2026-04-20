@@ -72,6 +72,10 @@ function normalizeAverage(value?: number) {
 }
 
 export function calculateScore(metric: StudentMetricInput) {
+  if (clampRate(metric.attendanceRate) <= 0) {
+    return 0;
+  }
+
   if (typeof metric.score === "number") {
     return Math.max(0, Math.min(100, metric.score));
   }
@@ -89,6 +93,21 @@ function buildMetricKey(metric: StudentMetricInput) {
   if (metric.studentId) return `student:${metric.studentId}`;
   if (metric.trackerId) return `tracker:${metric.trackerId}`;
   throw new Error("Each student metric must contain studentId or trackerId");
+}
+
+function normalizeStudentMetric(metric: StudentMetricInput) {
+  const attendanceRate = clampRate(metric.attendanceRate);
+  const lookUpRate = attendanceRate <= 0 ? 0 : clampRate(metric.lookUpRate);
+  const focusLevel = attendanceRate <= 0 ? 0 : clampRate(metric.focusLevel);
+  const participationCount =
+    attendanceRate <= 0 ? 0 : normalizeParticipation(metric.participationCount);
+
+  return {
+    attendanceRate,
+    lookUpRate,
+    focusLevel,
+    participationCount,
+  };
 }
 
 async function resolveKnownStudentIds(studentIds: string[]) {
@@ -190,6 +209,7 @@ export async function ingestInferencePayload(
 
     if (payload.studentMetrics?.length) {
       for (const metric of payload.studentMetrics) {
+        const normalizedMetric = normalizeStudentMetric(metric);
         const safeStudentId =
           metric.studentId && knownStudentIds.has(metric.studentId)
             ? metric.studentId
@@ -214,22 +234,22 @@ export async function ingestInferencePayload(
             studentId: safeStudentId,
             trackerId: safeTrackerId,
             displayName: metric.displayName,
-            attendanceRate: clampRate(metric.attendanceRate),
-            lookUpRate: clampRate(metric.lookUpRate),
-            focusLevel: clampRate(metric.focusLevel),
-            participationCount: normalizeParticipation(metric.participationCount),
-            score: calculateScore(metric),
+            attendanceRate: normalizedMetric.attendanceRate,
+            lookUpRate: normalizedMetric.lookUpRate,
+            focusLevel: normalizedMetric.focusLevel,
+            participationCount: normalizedMetric.participationCount,
+            score: calculateScore(normalizedMetric),
             rawSummary: metric.rawSummary,
           },
           update: {
             studentId: safeStudentId,
             trackerId: safeTrackerId,
             displayName: metric.displayName,
-            attendanceRate: clampRate(metric.attendanceRate),
-            lookUpRate: clampRate(metric.lookUpRate),
-            focusLevel: clampRate(metric.focusLevel),
-            participationCount: normalizeParticipation(metric.participationCount),
-            score: calculateScore(metric),
+            attendanceRate: normalizedMetric.attendanceRate,
+            lookUpRate: normalizedMetric.lookUpRate,
+            focusLevel: normalizedMetric.focusLevel,
+            participationCount: normalizedMetric.participationCount,
+            score: calculateScore(normalizedMetric),
             rawSummary: metric.rawSummary,
           },
         });
