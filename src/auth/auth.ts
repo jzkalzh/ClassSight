@@ -10,8 +10,43 @@ interface SystemUser {
   adminId?: string;
 }
 
+const authCookiePrefix = (process.env.AUTH_COOKIE_PREFIX ?? "classsight")
+  .trim()
+  .replace(/[^a-zA-Z0-9-_]/g, "-");
+const useSecureCookies = process.env.NODE_ENV === "production";
+const secureCookiePrefix = useSecureCookies ? "__Secure-" : "";
+const cookieBaseName = `${secureCookiePrefix}${authCookiePrefix}`;
+const baseCookieOptions = {
+  sameSite: "lax" as const,
+  path: "/",
+  secure: useSecureCookies,
+};
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET,
+  cookies: {
+    sessionToken: {
+      name: `${cookieBaseName}.session-token`,
+      options: {
+        ...baseCookieOptions,
+        httpOnly: true,
+      },
+    },
+    callbackUrl: {
+      name: `${cookieBaseName}.callback-url`,
+      options: {
+        ...baseCookieOptions,
+        httpOnly: false,
+      },
+    },
+    csrfToken: {
+      name: `${cookieBaseName}.csrf-token`,
+      options: {
+        ...baseCookieOptions,
+        httpOnly: false,
+      },
+    },
+  },
   providers: [
     CredentialsProvider({
       name: "Credentials",

@@ -72,6 +72,39 @@ function avg(values: number[]) {
   return Number((values.reduce((sum, item) => sum + item, 0) / values.length).toFixed(1));
 }
 
+function normalizeCourseMetric(
+  metric:
+    | {
+        attendanceRate: number;
+        focusLevel: number;
+        lookUpRate: number;
+        score: number;
+      }
+    | null
+    | undefined,
+) {
+  if (!metric) {
+    return null;
+  }
+
+  const attendanceRate = Number(metric.attendanceRate ?? 0);
+  if (attendanceRate <= 0) {
+    return {
+      attendanceRate: 0,
+      focusLevel: 0,
+      lookUpRate: 0,
+      score: 0,
+    };
+  }
+
+  return {
+    attendanceRate,
+    focusLevel: Number(metric.focusLevel ?? 0),
+    lookUpRate: Number(metric.lookUpRate ?? 0),
+    score: Number(metric.score ?? 0),
+  };
+}
+
 export async function GET() {
   const session = await auth();
   const user = session?.user as { id?: string; role?: number } | undefined;
@@ -90,7 +123,6 @@ export async function GET() {
       include: {
         department: true,
         courseEnrollments: {
-          where: { status: "enrolled" },
           include: {
             course: {
               include: {
@@ -138,14 +170,16 @@ export async function GET() {
               : latestSession?.status === "completed"
                 ? "completed"
                 : "pending",
-          metrics: latestMetric
-            ? {
-                attendanceRate: latestMetric.attendanceRate,
-                focusLevel: latestMetric.focusLevel,
-                lookUpRate: latestMetric.lookUpRate,
-                score: latestMetric.score,
-              }
-            : null,
+          metrics: normalizeCourseMetric(
+            latestMetric
+              ? {
+                  attendanceRate: latestMetric.attendanceRate,
+                  focusLevel: latestMetric.focusLevel,
+                  lookUpRate: latestMetric.lookUpRate,
+                  score: latestMetric.score,
+                }
+              : null,
+          ),
         };
       });
 

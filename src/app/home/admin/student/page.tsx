@@ -1,19 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import PageHeader from '@/components/PageHeader';
-import PageFooter from '@/components/PageFooter';
-import StudentNavigation from '@/components/StudentNavigation';
+import React, { useEffect, useMemo, useState } from "react";
+import { Upload } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from '@/components/ui/badge';
-import StudentAddDialog from '@/components/StudentAddDialog';
-import StudentEditDialog from '@/components/StudentEditDialog';
-import SearchBar from '@/components/SearchBar';
-import DataTable from '@/components/DataTable';
-import Pagination from '@/components/Pagination';
+import PageHeader from "@/components/PageHeader";
+import PageFooter from "@/components/PageFooter";
+import StudentNavigation from "@/components/StudentNavigation";
+import SearchBar from "@/components/SearchBar";
+import DataTable from "@/components/DataTable";
+import Pagination from "@/components/Pagination";
+import StudentAddDialog from "@/components/StudentAddDialog";
+import StudentEditDialog from "@/components/StudentEditDialog";
+import BulkImportDialog from "@/components/BulkImportDialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
-// 学生接口定义
 interface Student {
   name: string;
   studentId: string;
@@ -24,254 +26,275 @@ interface Student {
   class: string;
   email: string;
   phone: string;
-  password: string;
+  password?: string;
   enrollmentDate: string;
-  status: 'active' | 'suspended' | 'graduated';
-  courseCount: number;
+  status: "active" | "suspended" | "graduated";
+  courseCount?: number;
 }
 
-// 部门接口定义
 interface Department {
   id: string;
   name: string;
 }
 
+const ITEMS_PER_PAGE = 10;
+const STUDENT_BULK_SAMPLE = `姓名,学号,学院,专业,年级,班级,邮箱,电话,密码,状态,入学日期
+张晨,20250001,计算机学院,人工智能,2025,1班,zhangchen@example.com,13800000001,123456,在读,2025-09-01
+李雨桐,20250002,自动化学院,机器人工程,2025,2班,,13800000002,123456,在读,2025-09-01`;
+
+function normalizeDateInput(value?: string) {
+  if (!value) {
+    return new Date().toISOString().split("T")[0];
+  }
+
+  return value.includes("T") ? value.split("T")[0] : value;
+}
+
+function splitBulkLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (trimmed.includes("\t")) {
+    return trimmed.split("\t").map((item) => item.trim());
+  }
+
+  return trimmed.split(/[，,]/).map((item) => item.trim());
+}
+
+function mapStudentStatus(value?: string): Student["status"] {
+  const normalized = (value || "").trim().toLowerCase();
+
+  if (normalized === "休学" || normalized === "suspended") {
+    return "suspended";
+  }
+
+  if (normalized === "毕业" || normalized === "graduated") {
+    return "graduated";
+  }
+
+  return "active";
+}
+
 const StudentManagementPage: React.FC = () => {
-  // 状态管理
   const [students, setStudents] = useState<Student[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
+  const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+  const [bulkContent, setBulkContent] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [newStudent, setNewStudent] = useState<Partial<Student>>({
-    name: '',
-    studentId: '',
-    departmentId: '',
-    major: '',
-    grade: '2025',
-    class: '',
-    email: '',
-    phone: '',
-    password: '',
-    enrollmentDate: new Date().toISOString().split('T')[0],
-    status: 'active'
+    name: "",
+    studentId: "",
+    departmentId: "",
+    major: "",
+    grade: "2025",
+    class: "",
+    email: "",
+    phone: "",
+    password: "",
+    enrollmentDate: normalizeDateInput(),
+    status: "active",
   });
   const [editingStudent, setEditingStudent] = useState<Partial<Student>>({});
-  const itemsPerPage = 10;
 
-  // 从API获取学生数据
   const fetchStudents = async () => {
-    try {
-      const response = await fetch('/api/student', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error('获取学生数据失败');
-      }
-      
-      const result = await response.json();
-      console.log('学生API返回数据:', result);
-      
-      // 直接检查result是否为数组，如果是则使用，否则检查是否有data字段
-      const studentsArray = Array.isArray(result) ? result : (result && Array.isArray(result.data) ? result.data : []);
-      
-      // 确保每个学生对象都有departmentName属性
-      const studentsWithDepartmentName = studentsArray.map((student: any) => ({
-        ...student,
-        departmentName: student.departmentName || (student.department && student.department.name) || '未知学院'
-      }));
-      
-      setStudents(studentsWithDepartmentName);
-    } catch (err) {
-      console.error('获取学生数据时出错:', err);
-      toast.error('获取学生数据失败，请稍后重试');
-      // 出错时设置为空数组
-      setStudents([]);
+    const response = await fetch("/api/student", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("获取学生数据失败");
     }
+
+    const result = await response.json();
+    const studentsArray = Array.isArray(result)
+      ? result
+      : result && Array.isArray(result.data)
+        ? result.data
+        : [];
+
+    const normalizedStudents = studentsArray.map((student: any) => ({
+      ...student,
+      departmentName:
+        student.departmentName ||
+        student.department?.name ||
+        "未分配学院",
+      phone: student.phone || "",
+      email: student.email || "",
+      class: student.class || "",
+      major: student.major || "",
+      grade: student.grade || "",
+      enrollmentDate: normalizeDateInput(student.enrollmentDate),
+    }));
+
+    setStudents(normalizedStudents);
   };
 
-  // 从API获取部门数据
   const fetchDepartments = async () => {
-    try {
-      const response = await fetch('/api/department', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error('获取部门数据失败');
-      }
-      
-      const result = await response.json();
-      console.log('部门API返回数据:', result);
-      
-      // 根据用户提供的格式，从result.data字段获取部门数组
-      const departmentsArray = result && Array.isArray(result.data) ? result.data : [];
-      setDepartments(departmentsArray);
-    } catch (err) {
-      console.error('获取部门数据时出错:', err);
-      toast.error('获取部门数据失败，请稍后重试');
-      // 出错时设置为空数组
-      setDepartments([]);
+    const response = await fetch("/api/department", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("获取学院数据失败");
     }
+
+    const result = await response.json();
+    const departmentsArray =
+      result && Array.isArray(result.data) ? result.data : [];
+
+    setDepartments(departmentsArray);
   };
 
-  // 组件加载时获取数据
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setError(null);
+
       try {
-        // 分别处理每个请求，确保即使一个失败另一个也能继续
-        await fetchStudents();
-        await fetchDepartments();
-      } catch (err) {
-        setError('数据加载失败，请稍后重试');
+        await Promise.all([fetchStudents(), fetchDepartments()]);
+      } catch (error) {
+        console.error(error);
+        setError("学生数据加载失败，请稍后重试");
       } finally {
         setLoading(false);
       }
     };
-    
-    loadData();
+
+    void loadData();
   }, []);
 
-  // 处理搜索
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(e.target.value);
+  const filteredStudents = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) {
+      return students;
+    }
+
+    return students.filter((student) =>
+      [student.name, student.studentId, student.departmentName, student.major]
+        .filter(Boolean)
+        .some((item) => item.toLowerCase().includes(keyword))
+    );
+  }, [searchTerm, students]);
+
+  const totalPages = Math.ceil(filteredStudents.length / ITEMS_PER_PAGE);
+  const paginatedStudents = filteredStudents.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  const getDepartmentByKeyword = (keyword: string) => {
+    const normalized = keyword.trim().toLowerCase();
+    return departments.find(
+      (department) =>
+        department.id.toLowerCase() === normalized ||
+        department.name.trim().toLowerCase() === normalized
+    );
+  };
+
+  const resetNewStudent = () => {
+    setNewStudent({
+      name: "",
+      studentId: "",
+      departmentId: "",
+      major: "",
+      grade: "2025",
+      class: "",
+      email: "",
+      phone: "",
+      password: "",
+      enrollmentDate: normalizeDateInput(),
+      status: "active",
+    });
+  };
+
+  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
     setCurrentPage(1);
   };
 
-  // 过滤数据
-  const filteredStudents = students.filter(student => {
-    const lowerSearchTerm = searchTerm.toLowerCase();
-    // 确保所有字段在调用方法前都经过存在性和类型检查
-    return (typeof student.name === 'string' && student.name.toLowerCase().includes(lowerSearchTerm)) ||
-           (typeof student.studentId === 'string' && student.studentId.includes(searchTerm)) ||
-           (typeof student.departmentName === 'string' && student.departmentName.toLowerCase().includes(lowerSearchTerm)) ||
-           (typeof student.major === 'string' && student.major.toLowerCase().includes(lowerSearchTerm));
-  });
-
-  // 分页
-  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
-  const paginatedStudents = filteredStudents.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  // 处理添加学生
   const handleAddStudent = async () => {
-    if (!newStudent.name || !newStudent.studentId || !newStudent.departmentId || !newStudent.major || !newStudent.password) {
-      toast.error('请填写学生姓名、学号、所属学院、专业和密码');
-      return;
-    }
-
-    // 检查学号是否已存在
-    const isStudentIdExists = students.some(student => student.studentId === newStudent.studentId);
-    if (isStudentIdExists) {
-      toast.error('该学号已存在，请使用其他学号');
-      return;
-    }
-
-    const department = departments.find(d => d.id === newStudent.departmentId);
-    if (!department) {
-      toast.error('请选择有效的学院');
+    if (
+      !newStudent.name ||
+      !newStudent.studentId ||
+      !newStudent.departmentId ||
+      !newStudent.major ||
+      !newStudent.password
+    ) {
+      toast.error("请填写姓名、学号、学院、专业和密码");
       return;
     }
 
     try {
-      const response = await fetch('/api/student', {
-        method: 'POST',
+      const response = await fetch("/api/student", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           name: newStudent.name,
           studentId: newStudent.studentId,
           departmentId: newStudent.departmentId,
           major: newStudent.major,
-          grade: newStudent.grade || '2025',
-          class: newStudent.class || '',
-          email: newStudent.email || '',
-          phone: newStudent.phone || '',
+          grade: newStudent.grade || "2025",
+          class: newStudent.class || "",
+          email: newStudent.email || "",
+          phone: newStudent.phone || "",
           password: newStudent.password,
-          enrollmentDate: newStudent.enrollmentDate ? `${newStudent.enrollmentDate}T00:00:00.000Z` : new Date().toISOString(),
-          status: newStudent.status as 'active' | 'suspended' | 'graduated' || 'active'
+          enrollmentDate: newStudent.enrollmentDate
+            ? `${normalizeDateInput(newStudent.enrollmentDate)}T00:00:00.000Z`
+            : new Date().toISOString(),
+          status: (newStudent.status as Student["status"]) || "active",
         }),
       });
 
+      const result = await response.json();
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || errorData.message || '添加学生失败');
+        throw new Error(result.error || result.message || "添加学生失败");
       }
 
-      const result = await response.json();
-      console.log('添加学生API返回:', result);
-      
-      // 从result.data字段提取创建的学生数据
-      const createdStudent = result && result.data ? result.data : {};
-      // 添加departmentName到返回的数据中
-      createdStudent.departmentName = department.name;
-      
-      setStudents([...students, createdStudent]);
+      await fetchStudents();
       setIsAddDialogOpen(false);
-      setNewStudent({
-        name: '',
-        studentId: '',
-        departmentId: '',
-        major: '',
-        grade: '2025',
-        class: '',
-        email: '',
-        phone: '',
-        password: '',
-        enrollmentDate: new Date().toISOString().split('T')[0],
-        status: 'active'
-      });
-      toast.success('学生信息添加成功');
-    } catch (err: any) {
-      console.error('添加学生时出错:', err);
-      // 特别处理学号重复的错误
-      const errorMessage = err.message || '';
-      if (errorMessage.includes('Unique constraint failed') || 
-          errorMessage.includes('studentId') || 
-          errorMessage.includes('重复')) {
-        toast.error('该学号已存在，请使用其他学号');
-      } else {
-        toast.error(errorMessage || '添加学生失败，请稍后重试');
-      }
+      resetNewStudent();
+      toast.success("学生信息已添加");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "添加学生失败");
     }
   };
 
-  // 处理编辑学生
   const handleEditStudent = async () => {
-    if (!selectedStudent || !editingStudent.name || !editingStudent.studentId || !editingStudent.departmentId || !editingStudent.major) {
-      toast.error('请填写学生姓名、学号、所属学院和专业');
-      return;
-    }
-
-    const department = departments.find(d => d.id === editingStudent.departmentId);
-    if (!department) {
-      toast.error('请选择有效的学院');
+    if (
+      !selectedStudent ||
+      !editingStudent.name ||
+      !editingStudent.studentId ||
+      !editingStudent.departmentId ||
+      !editingStudent.major
+    ) {
+      toast.error("请填写姓名、学号、学院和专业");
       return;
     }
 
     try {
       const response = await fetch(`/api/student/${selectedStudent.studentId}`, {
-        method: 'PUT',
+        method: "PUT",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           name: editingStudent.name,
@@ -282,82 +305,61 @@ const StudentManagementPage: React.FC = () => {
           class: editingStudent.class || selectedStudent.class,
           email: editingStudent.email || selectedStudent.email,
           phone: editingStudent.phone || selectedStudent.phone,
-          enrollmentDate: editingStudent.enrollmentDate ? 
-            // 确保处理日期格式，避免重复添加时间部分
-            (editingStudent.enrollmentDate.includes('T') ? 
-              editingStudent.enrollmentDate : 
-              `${editingStudent.enrollmentDate}T00:00:00.000Z`
-            ) : 
-            // 确保使用selectedStudent中的日期前先规范化格式
-            (selectedStudent.enrollmentDate && selectedStudent.enrollmentDate.includes('T00:00:00.000ZT00:00:00.000Z') ? 
-              selectedStudent.enrollmentDate.split('T00:00:00.000Z')[0] + 'T00:00:00.000Z' : 
-              selectedStudent.enrollmentDate
-            ),
-          status: editingStudent.status as 'active' | 'suspended' | 'graduated' || selectedStudent.status
+          enrollmentDate: editingStudent.enrollmentDate
+            ? `${normalizeDateInput(editingStudent.enrollmentDate)}T00:00:00.000Z`
+            : selectedStudent.enrollmentDate,
+          status:
+            (editingStudent.status as Student["status"]) || selectedStudent.status,
         }),
       });
 
+      const result = await response.json();
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || '更新学生信息失败');
+        throw new Error(result.error || result.message || "更新学生失败");
       }
 
-      const result = await response.json();
-      console.log('更新学生API返回:', result);
-      
-      // 从result.data字段提取更新后的学生数据
-      const updatedStudent = result && result.data ? result.data : {};
-      // 更新departmentName
-      updatedStudent.departmentName = department.name;
-      
-      setStudents(students.map(student => 
-        student.studentId === selectedStudent.studentId ? updatedStudent : student
-      ));
-
+      await fetchStudents();
       setIsEditDialogOpen(false);
       setSelectedStudent(null);
       setEditingStudent({});
-      toast.success('学生信息已更新');
-    } catch (err: any) {
-      console.error('更新学生信息时出错:', err);
-      toast.error(err.message || '更新学生信息失败，请稍后重试');
+      toast.success("学生信息已更新");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "更新学生失败");
     }
   };
 
-  // 处理删除学生
-  const handleDeleteStudent = async () => {
-    if (!selectedStudent) return;
+  const handleDeleteStudent = async (student?: Student) => {
+    const targetStudent = student || selectedStudent;
+    if (!targetStudent) {
+      return;
+    }
 
     try {
-      const response = await fetch(`/api/student/${selectedStudent.studentId}`, {
-        method: 'DELETE',
+      const response = await fetch(`/api/student/${targetStudent.studentId}`, {
+        method: "DELETE",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
       });
 
+      const result = await response.json();
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || '删除学生信息失败');
+        throw new Error(result.error || result.message || "删除学生失败");
       }
 
-      setStudents(students.filter(student => student.studentId !== selectedStudent.studentId));
+      await fetchStudents();
       setIsDeleteDialogOpen(false);
       setSelectedStudent(null);
-      toast.success('学生信息已删除');
-    } catch (err: any) {
-      console.error('删除学生信息时出错:', err);
-      toast.error(err.message || '删除学生信息失败，请稍后重试');
+      toast.success("学生信息已删除");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "删除学生失败");
     }
   };
 
-  // 打开编辑对话框
   const openEditDialog = (student: Student) => {
     setSelectedStudent(student);
-    // 规范化日期格式，确保不含时间部分
-    const normalizedEnrollmentDate = student.enrollmentDate.includes('T') 
-      ? student.enrollmentDate.split('T')[0] 
-      : student.enrollmentDate;
     setEditingStudent({
       name: student.name,
       studentId: student.studentId,
@@ -367,215 +369,280 @@ const StudentManagementPage: React.FC = () => {
       class: student.class,
       email: student.email,
       phone: student.phone,
-      enrollmentDate: normalizedEnrollmentDate,
-      status: student.status
+      enrollmentDate: normalizeDateInput(student.enrollmentDate),
+      status: student.status,
     });
     setIsEditDialogOpen(true);
   };
 
-  // 打开删除对话框
-  const openDeleteStudentDialog = (student: Student) => {
-    setSelectedStudent(student);
-    setIsDeleteDialogOpen(true);
-  };
+  const handleBulkAddStudents = async () => {
+    const lines = bulkContent
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
 
-  // 分页控制
-  const goToPage = (page: number) => {
-    if (page > 0 && page <= totalPages) {
-      setCurrentPage(page);
+    if (lines.length === 0) {
+      toast.error("请先粘贴批量导入内容");
+      return;
+    }
+
+    const payload: Array<Record<string, string>> = [];
+
+    try {
+      lines.forEach((line, index) => {
+        const columns = splitBulkLine(line);
+        if (columns.length === 0) {
+          return;
+        }
+
+        if (
+          index === 0 &&
+          ["姓名", "name"].some((marker) => columns[0]?.includes(marker))
+        ) {
+          return;
+        }
+
+        if (columns.length < 9) {
+          throw new Error(`第 ${index + 1} 行字段不足，至少需要 9 列`);
+        }
+
+        const [
+          name,
+          studentId,
+          departmentKeyword,
+          major,
+          grade,
+          className,
+          email,
+          phone,
+          password,
+          status,
+          enrollmentDate,
+        ] = columns;
+
+        const department = getDepartmentByKeyword(departmentKeyword);
+        if (!department) {
+          throw new Error(`第 ${index + 1} 行学院“${departmentKeyword}”未匹配到系统学院`);
+        }
+
+        payload.push({
+          name,
+          studentId,
+          departmentId: department.id,
+          major,
+          grade: grade || "2025",
+          class: className || "",
+          email: email || "",
+          phone: phone || "",
+          password,
+          status: mapStudentStatus(status),
+          enrollmentDate: enrollmentDate
+            ? `${normalizeDateInput(enrollmentDate)}T00:00:00.000Z`
+            : new Date().toISOString(),
+        });
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "批量内容解析失败");
+      return;
+    }
+
+    if (payload.length === 0) {
+      toast.error("没有识别到可导入的学生记录");
+      return;
+    }
+
+    setIsBulkSubmitting(true);
+    try {
+      const response = await fetch("/api/student", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      if (!response.ok && !result.summary) {
+        throw new Error(result.error || result.message || "批量导入失败");
+      }
+
+      await fetchStudents();
+      setIsBulkDialogOpen(false);
+      setBulkContent("");
+
+      const summary = result.summary;
+      if (summary?.failed) {
+        const failedNames = (result.errors || [])
+          .slice(0, 3)
+          .map((item: { name?: string; studentId?: string }) => item.name || item.studentId)
+          .filter(Boolean)
+          .join("、");
+        toast.warning(
+          `学生批量导入完成，成功 ${summary.created} 条，失败 ${summary.failed} 条${failedNames ? `：${failedNames}` : ""}`
+        );
+      } else {
+        toast.success(`学生批量导入成功，共新增 ${summary?.created || payload.length} 条`);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "批量导入失败");
+    } finally {
+      setIsBulkSubmitting(false);
     }
   };
 
-  // 获取状态显示样式
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'active':
-        return <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">在读</Badge>;
-      case 'suspended':
-        return <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300">休学</Badge>;
-      case 'graduated':
-        return <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">毕业</Badge>;
+      case "active":
+        return (
+          <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+            在读
+          </Badge>
+        );
+      case "suspended":
+        return (
+          <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300">
+            休学
+          </Badge>
+        );
+      case "graduated":
+        return (
+          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">
+            毕业
+          </Badge>
+        );
       default:
         return <Badge>{status}</Badge>;
     }
   };
 
-  // 加载状态显示
   if (loading) {
     return (
-      <div className="bg-gray-50 dark:bg-[oklch(0.145_0_0)] text-gray-900 dark:text-white">
-        {/* 顶部导航 */}
+      <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-[oklch(0.145_0_0)] dark:text-white">
         <PageHeader title="ClassSight 管理系统" welcomeText="欢迎，管理员" />
-
-        {/* 导航菜单 */}
         <StudentNavigation role={2} />
-
-        {/* 主要内容区域 */}
         <main className="container mx-auto px-4 py-8">
-          <div className="bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-md p-6 mb-6">
-            <h1 className="text-2xl font-bold mb-2">学生管理</h1>
-            <p className="text-gray-500 dark:text-gray-400 mb-6">
-              管理所有学生信息、学籍状态和选课情况
+          <div className="rounded-3xl bg-white p-6 shadow-md dark:bg-[oklch(0.205_0_0)]">
+            <h1 className="text-2xl font-bold">学生管理</h1>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              正在加载学生名单与学院信息...
             </p>
           </div>
-          
-          <div className="bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-md p-6 min-h-[300px] flex items-center justify-center">
-            <div className="text-xl font-medium">加载中...</div>
-          </div>
         </main>
-        
-        {/* 页脚 */}
-        <PageFooter />
-      </div>
-    );
-  }
-
-  // 错误状态显示
-  if (error) {
-    return (
-      <div className="bg-gray-50 dark:bg-[oklch(0.145_0_0)] text-gray-900 dark:text-white">
-        {/* 顶部导航 */}
-        <PageHeader title="ClassSight 管理系统" welcomeText="欢迎，管理员" />
-
-        {/* 导航菜单 */}
-        <StudentNavigation role={2} />
-
-        {/* 主要内容区域 */}
-        <main className="container mx-auto px-4 py-8">
-          <div className="bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-md p-6 mb-6">
-            <h1 className="text-2xl font-bold mb-2">学生管理</h1>
-            <p className="text-gray-500 dark:text-gray-400 mb-6">
-              管理所有学生信息、学籍状态和选课情况
-            </p>
-          </div>
-          
-          <div className="bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-md p-6 min-h-[300px] flex flex-col items-center justify-center">
-            <div className="text-red-500 text-xl font-medium mb-4">{error}</div>
-            <button 
-              onClick={() => {
-                setError(null);
-                Promise.all([fetchStudents(), fetchDepartments()]);
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              重新加载
-            </button>
-          </div>
-        </main>
-        
-        {/* 页脚 */}
         <PageFooter />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-[oklch(0.145_0_0)] text-gray-900 dark:text-white">
-      {/* 顶部导航 */}
+    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-[oklch(0.145_0_0)] dark:text-white">
       <PageHeader title="ClassSight 管理系统" welcomeText="欢迎，管理员" />
-
-      {/* 导航菜单 */}
       <StudentNavigation role={2} />
 
-      {/* 主要内容区域 */}
       <main className="container mx-auto px-4 py-8">
-        <div className="bg-white dark:bg-[oklch(0.205_0_0)] rounded-xl shadow-md p-6 mb-6">
-          <h1 className="text-2xl font-bold mb-2">学生管理</h1>
-          <p className="text-gray-500 dark:text-gray-400 mb-6">
-            管理所有学生信息、学籍状态和选课情况
+        <div className="mb-6 rounded-3xl bg-white p-6 shadow-md dark:bg-[oklch(0.205_0_0)]">
+          <h1 className="text-2xl font-bold">学生管理</h1>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            支持单个录入、批量导入、编辑和删除学生资料。
           </p>
         </div>
 
-        {/* 使用搜索栏组件 */}
-        <SearchBar
-          searchTerm={searchTerm}
-          onSearch={handleSearch}
-          placeholder="搜索学生姓名或学号..."
-          onAddClick={() => setIsAddDialogOpen(true)}
-          addButtonText="添加学生"
-        />
-
-        {/* 使用数据表格组件 */}
-        {/* 为每个学生添加id属性，确保DataTable可以正确识别唯一标识 */}
-        <DataTable
-          title="学生列表"
-          data={paginatedStudents.map(student => ({ ...student, id: student.studentId }))}
-          columns={[
-            { header: '姓名', accessor: 'name', className: 'font-medium' },
-            { header: '学号', accessor: 'studentId' },
-            { header: '所属学院', accessor: 'departmentName' },
-            { header: '专业', accessor: 'major' },
-            { 
-              header: '年级班级', 
-              accessor: (student) => `${student.grade}级${student.class}`
-            },
-            { 
-              header: '邮箱', 
-              accessor: (student) => (
-                <a
-                  href={`mailto:${student.email}`}
-                  className="text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  {student.email}
-                </a>
-              )
-            },
-            { header: '电话', accessor: 'phone' },
-            { header: '状态', accessor: 'status' }
-          ]}
-          onEdit={(student) => openEditDialog(student)}
-          onDelete={(student) => openDeleteStudentDialog(student)}
-          deleteDialogOpen={isDeleteDialogOpen}
-          setDeleteDialogOpen={setIsDeleteDialogOpen}
-          selectedItem={selectedStudent}
-          setSelectedItem={setSelectedStudent}
-          emptyStateText="没有找到符合条件的学生"
-          getStatusBadge={getStatusBadge}
-        />
-        
-        {/* 确认删除对话框 - 直接在页面中实现，不依赖DataTable组件 */}
-        {isDeleteDialogOpen && selectedStudent && (
-          <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
-              <h3 className="text-lg font-medium mb-4">确认删除</h3>
-              <p className="text-gray-600 dark:text-gray-300 mb-6">
-                您确定要删除学生「{selectedStudent.name}」吗？此操作无法撤销。
-              </p>
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setIsDeleteDialogOpen(false)}
-                  className="px-4 py-2 border rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleDeleteStudent}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-                >
-                  删除
-                </button>
-              </div>
-            </div>
+        {error ? (
+          <div className="rounded-3xl bg-white p-8 shadow-md dark:bg-[oklch(0.205_0_0)]">
+            <p className="text-lg font-medium text-red-500">{error}</p>
+            <Button
+              className="mt-4"
+              onClick={() => {
+                setLoading(true);
+                setError(null);
+                void Promise.all([fetchStudents(), fetchDepartments()]).finally(() =>
+                  setLoading(false)
+                );
+              }}
+            >
+              重新加载
+            </Button>
           </div>
-        )}
+        ) : (
+          <>
+            <SearchBar
+              searchTerm={searchTerm}
+              onSearch={handleSearch}
+              placeholder="搜索学生姓名、学号、学院或专业"
+              onAddClick={() => setIsAddDialogOpen(true)}
+              addButtonText="添加学生"
+              additionalContent={
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={() => setIsBulkDialogOpen(true)}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  批量添加
+                </Button>
+              }
+            />
 
-        {/* 使用分页控件组件 */}
-        <Pagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={filteredStudents.length}
-          itemsPerPage={itemsPerPage}
-          onPageChange={goToPage}
-        />
+            <DataTable
+              title="学生列表"
+              data={paginatedStudents.map((student) => ({
+                ...student,
+                id: student.studentId,
+              }))}
+              columns={[
+                { header: "姓名", accessor: "name", className: "font-medium" },
+                { header: "学号", accessor: "studentId" },
+                { header: "所属学院", accessor: "departmentName" },
+                { header: "专业", accessor: "major" },
+                {
+                  header: "年级班级",
+                  accessor: (student) => `${student.grade || "--"} ${student.class || ""}`,
+                },
+                {
+                  header: "邮箱",
+                  accessor: (student) => (
+                    <a
+                      href={`mailto:${student.email}`}
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {student.email || "--"}
+                    </a>
+                  ),
+                },
+                {
+                  header: "电话",
+                  accessor: (student) => student.phone || "--",
+                },
+                { header: "状态", accessor: "status" },
+              ]}
+              onEdit={(student) => openEditDialog(student)}
+              onDelete={(student) => handleDeleteStudent(student)}
+              deleteDialogOpen={isDeleteDialogOpen}
+              setDeleteDialogOpen={setIsDeleteDialogOpen}
+              selectedItem={selectedStudent as any}
+              setSelectedItem={setSelectedStudent as any}
+              emptyStateText="当前没有匹配到学生记录"
+              getStatusBadge={getStatusBadge}
+            />
+
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredStudents.length}
+              itemsPerPage={ITEMS_PER_PAGE}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
       </main>
 
-      {/* 对话框部分 - 确保传入有效的部门数组 */}
       <StudentAddDialog
         open={isAddDialogOpen}
         onOpenChange={setIsAddDialogOpen}
         newStudent={newStudent}
         setNewStudent={setNewStudent}
-        departments={Array.isArray(departments) ? departments : []}
+        departments={departments}
         onAddStudent={handleAddStudent}
       />
 
@@ -584,12 +651,24 @@ const StudentManagementPage: React.FC = () => {
         onOpenChange={setIsEditDialogOpen}
         editingStudent={editingStudent}
         setEditingStudent={setEditingStudent}
-        departments={Array.isArray(departments) ? departments : []}
+        departments={departments}
         onEditStudent={handleEditStudent}
         selectedStudent={selectedStudent}
       />
 
-      {/* 页脚 */}
+      <BulkImportDialog
+        open={isBulkDialogOpen}
+        onOpenChange={setIsBulkDialogOpen}
+        title="批量添加学生"
+        description="支持粘贴 Excel 导出的逗号分隔或制表符内容，系统会按行解析并逐条写入。"
+        formatHint="格式为：姓名, 学号, 学院名称或学院ID, 专业, 年级, 班级, 邮箱, 电话, 密码, 状态, 入学日期。前 9 列为基础必填，状态和入学日期可省略。"
+        sample={STUDENT_BULK_SAMPLE}
+        value={bulkContent}
+        onChange={setBulkContent}
+        onSubmit={handleBulkAddStudents}
+        isSubmitting={isBulkSubmitting}
+      />
+
       <PageFooter />
     </div>
   );

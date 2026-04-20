@@ -3,12 +3,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  Activity,
   AlertCircle,
   BookOpen,
   Brain,
   ChevronRight,
   Eye,
   Radar,
+  ShieldAlert,
+  Target,
   Users,
 } from "lucide-react";
 import {
@@ -114,7 +117,25 @@ function formatPercent(value: number) {
   return `${Number(value.toFixed(1))}%`;
 }
 
-const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表现总览" }) => {
+function formatDateTime(value?: string | null) {
+  if (!value) return "暂无记录";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "暂无记录";
+  }
+
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+const StudentPerformanceChart: React.FC<PerformanceChartProps> = ({
+  title = "学生表现总览",
+}) => {
   const [data, setData] = useState<TeacherDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -158,9 +179,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
     if (!data?.performance) return [];
     return data.performance.students.slice(0, 8).map((student) => ({
       name: student.name,
-      出勤率: Number(student.attendanceRate.toFixed(1)),
-      抬头率: Number(student.lookUpRate.toFixed(1)),
-      专注度: Number(student.focusLevel.toFixed(1)),
+      attendanceRate: Number(student.attendanceRate.toFixed(1)),
+      lookUpRate: Number(student.lookUpRate.toFixed(1)),
+      focusLevel: Number(student.focusLevel.toFixed(1)),
     }));
   }, [data]);
 
@@ -171,6 +192,147 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
       { name: "未签到", value: data.performance.attendanceSummary.absentCount },
     ];
   }, [data]);
+
+  const courseInsights = useMemo(() => {
+    if (!data?.performance) return null;
+
+    const metricEntries = [
+      {
+        label: "出勤率",
+        value: data.performance.classStats.avgAttendance,
+        suggestion: "继续保持签到节奏，同时优先关注迟到与缺勤学生。",
+      },
+      {
+        label: "抬头率",
+        value: data.performance.classStats.avgLookUpRate,
+        suggestion: "建议加入更多提问、板书切换或走动教学，提升学生视线跟随度。",
+      },
+      {
+        label: "专注度",
+        value: data.performance.classStats.avgFocusLevel,
+        suggestion: "可在知识点切换时插入短互动，帮助学生重新聚焦。",
+      },
+    ];
+
+    const strongestMetric = metricEntries.reduce((best, current) =>
+      current.value > best.value ? current : best,
+    );
+    const weakestMetric = metricEntries.reduce((best, current) =>
+      current.value < best.value ? current : best,
+    );
+    const dominantGroup = [...data.performance.classStats.distribution].sort(
+      (left, right) => right.value - left.value,
+    )[0];
+    const topAverageScore =
+      data.performance.topStudents.reduce((sum, student) => sum + student.score, 0) /
+      Math.max(data.performance.topStudents.length, 1);
+
+    return {
+      strongestMetric,
+      weakestMetric,
+      dominantGroup,
+      topAverageScore,
+      attentionCount: data.performance.attentionStudents.length,
+    };
+  }, [data]);
+
+  const commandCenter = useMemo(() => {
+    if (!data?.performance || !courseInsights) return null;
+
+    const attendanceGap =
+      data.performance.classStats.totalStudents - data.performance.attendanceSummary.presentCount;
+    const weakMetricDelta = courseInsights.strongestMetric.value - courseInsights.weakestMetric.value;
+    const riskLevel =
+      attendanceGap >= 6 || courseInsights.attentionCount >= 5
+        ? "high"
+        : attendanceGap >= 3 || courseInsights.attentionCount >= 2
+          ? "medium"
+          : "low";
+
+    const headline =
+      riskLevel === "high"
+        ? "本节课需要立即干预"
+        : riskLevel === "medium"
+          ? "课堂状态可控，但有波动"
+          : "课堂状态整体稳定";
+
+    const summary =
+      riskLevel === "high"
+        ? "优先处理缺勤和风险学生，再调整课堂节奏。"
+        : riskLevel === "medium"
+          ? "建议先做一次提问或互动，拉齐前后排专注状态。"
+          : "可以保持当前节奏，适合推进新内容或课堂总结。";
+
+    return {
+      attendanceGap,
+      weakMetricDelta,
+      riskLevel,
+      headline,
+      summary,
+    };
+  }, [courseInsights, data]);
+
+  const rhythmTimeline = useMemo(() => {
+    if (!data?.performance || !courseInsights) return [];
+
+    return [
+      {
+        label: "课前签到",
+        value: data.performance.classStats.avgAttendance,
+        description: `${data.performance.attendanceSummary.presentCount}/${data.performance.classStats.totalStudents} 人到课`,
+        tone: data.performance.classStats.avgAttendance >= 90 ? "emerald" : "amber",
+      },
+      {
+        label: "课堂跟随",
+        value: data.performance.classStats.avgLookUpRate,
+        description: `抬头率 ${formatPercent(data.performance.classStats.avgLookUpRate)}`,
+        tone: data.performance.classStats.avgLookUpRate >= 70 ? "sky" : "amber",
+      },
+      {
+        label: "深度专注",
+        value: data.performance.classStats.avgFocusLevel,
+        description: `专注度 ${formatPercent(data.performance.classStats.avgFocusLevel)}`,
+        tone: data.performance.classStats.avgFocusLevel >= 75 ? "violet" : "amber",
+      },
+      {
+        label: "互动产出",
+        value: Math.min(data.performance.classStats.avgParticipationCount * 20, 100),
+        description: `平均互动 ${data.performance.classStats.avgParticipationCount.toFixed(1)} 次`,
+        tone: data.performance.classStats.avgParticipationCount >= 3 ? "rose" : "slate",
+      },
+    ];
+  }, [courseInsights, data]);
+
+  const strategyCards = useMemo(() => {
+    if (!data?.performance || !courseInsights || !commandCenter) return [];
+
+    return [
+      {
+        title: "优先动作",
+        body: courseInsights.weakestMetric.suggestion,
+        icon: Target,
+        tone:
+          commandCenter.riskLevel === "high"
+            ? "border-rose-200 bg-rose-50 text-rose-700"
+            : "border-amber-200 bg-amber-50 text-amber-700",
+      },
+      {
+        title: "班级信号",
+        body: `当前主体分布为“${courseInsights.dominantGroup?.name ?? "稳定"}”，强弱指标差值 ${commandCenter.weakMetricDelta.toFixed(1)}。`,
+        icon: Activity,
+        tone: "border-sky-200 bg-sky-50 text-sky-700",
+      },
+      {
+        title: "风险提示",
+        body: `未到课 ${commandCenter.attendanceGap} 人，重点关注 ${courseInsights.attentionCount} 人。`,
+        icon: ShieldAlert,
+        tone:
+          commandCenter.riskLevel === "low"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-slate-200 bg-slate-50 text-slate-700",
+      },
+    ];
+  }, [commandCenter, courseInsights, data]);
 
   if (loading) {
     return (
@@ -211,7 +373,8 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
           <p className="text-sm uppercase tracking-[0.2em] text-sky-200">Teacher Pulse</p>
           <h2 className="mt-2 text-2xl font-semibold">{title}</h2>
           <p className="mt-2 max-w-2xl text-sm text-slate-200">
-            {teacher.name}，你的教师驾驶舱已经准备好，等边缘设备开始上传课堂识别数据后，这里会自动展示签到、专注度和学生分层结果。
+            {teacher.name}，当前还没有课堂监测数据。边缘设备开始上传后，这里会自动展示签到、专注度、
+            抬头率和学生分层结果。
           </p>
         </div>
         <div className="grid gap-4 p-6 md:grid-cols-3">
@@ -221,11 +384,15 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
           </div>
           <div className="rounded-2xl bg-slate-50 p-5">
             <p className="text-sm text-slate-500">已接入监测</p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">{courseOverview.monitoredCourseCount}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-900">
+              {courseOverview.monitoredCourseCount}
+            </p>
           </div>
           <div className="rounded-2xl bg-slate-50 p-5">
-            <p className="text-sm text-slate-500">当前推荐动作</p>
-            <p className="mt-2 text-lg font-medium text-slate-900">先启动一门课程的数据采集</p>
+            <p className="text-sm text-slate-500">建议动作</p>
+            <p className="mt-2 text-lg font-medium text-slate-900">
+              先启动一门课程的数据采集，再返回这里查看画像。
+            </p>
           </div>
         </div>
       </div>
@@ -240,8 +407,8 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
             <p className="text-sm uppercase tracking-[0.24em] text-sky-200">Teacher Insight Deck</p>
             <h2 className="mt-2 text-3xl font-semibold">{title}</h2>
             <p className="mt-3 max-w-3xl text-sm text-slate-200">
-              当前正在聚焦 <span className="font-semibold text-white">{performance.courseName}</span>，
-              将签到、抬头率、专注度和课堂参与度整合为一个教师可操作的观察面板。
+              当前聚焦 <span className="font-semibold text-white">{performance.courseName}</span>，
+              将签到、抬头率、专注度和课堂参与度整合成可直接用于教学观察的面板。
             </p>
           </div>
           <Link
@@ -263,8 +430,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
               {formatPercent(performance.classStats.avgAttendance)}
             </p>
             <p className="mt-2 text-xs text-slate-300">
-              已签到 {performance.attendanceSummary.presentCount} 人 / 共{" "}
-              {performance.classStats.totalStudents} 人
+              已签到 {performance.attendanceSummary.presentCount} / {performance.classStats.totalStudents} 人
             </p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/8 p-4 backdrop-blur">
@@ -275,7 +441,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
             <p className="mt-3 text-3xl font-semibold">
               {formatPercent(performance.classStats.avgLookUpRate)}
             </p>
-            <p className="mt-2 text-xs text-slate-300">教师可快速识别课堂注意力波动</p>
+            <p className="mt-2 text-xs text-slate-300">可快速观察学生是否跟随课堂节奏</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/8 p-4 backdrop-blur">
             <div className="flex items-center justify-between text-sky-100">
@@ -285,7 +451,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
             <p className="mt-3 text-3xl font-semibold">
               {formatPercent(performance.classStats.avgFocusLevel)}
             </p>
-            <p className="mt-2 text-xs text-slate-300">按边缘设备上报的课堂行为综合评分</p>
+            <p className="mt-2 text-xs text-slate-300">综合课堂行为数据计算得到的整体状态</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/8 p-4 backdrop-blur">
             <div className="flex items-center justify-between text-sky-100">
@@ -311,6 +477,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
               {performance.courseCode}
             </span>
           </div>
+
           <div className="grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl bg-white p-4 shadow-sm">
               <p className="text-sm text-slate-500">当前课程</p>
@@ -339,6 +506,211 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
               <p className="mt-2 text-sm text-slate-500">
                 已接入监测 {courseOverview.monitoredCourseCount} 门
               </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_1fr_1fr]">
+            <div className="rounded-2xl bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500">课堂快照</p>
+                  <p className="mt-1 text-base font-semibold text-slate-900">
+                    {performance.session?.classroom ?? courseOverview.currentCourse?.location ?? "教室待定"}
+                  </p>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                  {performance.session?.status ?? "未采集"}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-slate-500">开始时间</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {formatDateTime(performance.session?.startedAt)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-slate-500">结束时间</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {formatDateTime(performance.session?.endedAt)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-slate-500">到课人数</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {performance.attendanceSummary.presentCount} / {performance.classStats.totalStudents}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-slate-500">重点关注</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {courseInsights?.attentionCount ?? 0} 人
+                  </p>
+                </div>
+              </div>
+              <p className="mt-4 text-xs leading-6 text-slate-500">
+                数据源：{performance.session?.sourceStream ?? "边缘设备课堂采集流"}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-white p-4 shadow-sm">
+              <p className="text-sm text-slate-500">画像解读</p>
+              <div className="mt-4 space-y-3">
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                  <p className="text-xs text-emerald-600">当前强项</p>
+                  <p className="mt-1 text-base font-semibold text-emerald-900">
+                    {courseInsights?.strongestMetric.label ?? "暂无"}
+                  </p>
+                  <p className="mt-1 text-sm text-emerald-700">
+                    {courseInsights ? formatPercent(courseInsights.strongestMetric.value) : "--"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
+                  <p className="text-xs text-amber-600">优先优化</p>
+                  <p className="mt-1 text-base font-semibold text-amber-900">
+                    {courseInsights?.weakestMetric.label ?? "暂无"}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-amber-700">
+                    {courseInsights?.weakestMetric.suggestion ?? "等待课堂行为数据。"}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">高分学生均值</p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">
+                  {(courseInsights?.topAverageScore ?? 0).toFixed(1)}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  可作为本节课的正向样本，对照观察课堂节奏和互动设计。
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-white p-4 shadow-sm">
+              <p className="text-sm text-slate-500">分层结构</p>
+              <p className="mt-1 text-base font-semibold text-slate-900">
+                主体分布：{courseInsights?.dominantGroup?.name ?? "暂无"}
+              </p>
+              <div className="mt-4 space-y-3">
+                {performance.classStats.distribution.map((item) => {
+                  const denominator = Math.max(performance.classStats.totalStudents, 1);
+                  const width = Math.max((item.value / denominator) * 100, item.value ? 12 : 0);
+
+                  return (
+                    <div key={item.name}>
+                      <div className="mb-1 flex items-center justify-between text-sm">
+                        <span className="text-slate-600">{item.name}</span>
+                        <span className="font-medium text-slate-900">{item.value} 人</span>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-slate-100">
+                        <div
+                          className="h-2.5 rounded-full bg-gradient-to-r from-sky-500 to-cyan-400"
+                          style={{ width: `${Math.min(width, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                当前班级更偏向
+                <span className="mx-1 font-semibold text-slate-900">
+                  {courseInsights?.dominantGroup?.name ?? "稳定"}
+                </span>
+                状态，适合结合风险学生名单做针对性提醒。
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-3xl bg-[linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(30,41,59,0.95))] p-5 text-white shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-sky-200">Classroom Command</p>
+                  <h4 className="mt-2 text-xl font-semibold">
+                    {commandCenter?.headline ?? "课堂状态分析中"}
+                  </h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    {commandCenter?.summary ?? "等待课堂画像数据。"}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    commandCenter?.riskLevel === "high"
+                      ? "bg-rose-500/20 text-rose-200"
+                      : commandCenter?.riskLevel === "medium"
+                        ? "bg-amber-500/20 text-amber-100"
+                        : "bg-emerald-500/20 text-emerald-100"
+                  }`}
+                >
+                  {commandCenter?.riskLevel === "high"
+                    ? "高风险"
+                    : commandCenter?.riskLevel === "medium"
+                      ? "中等波动"
+                      : "稳定"}
+                </span>
+              </div>
+
+              <div className="mt-5 grid gap-3 md:grid-cols-3">
+                {strategyCards.map((item) => {
+                  const Icon = item.icon;
+
+                  return (
+                    <div
+                      key={item.title}
+                      className={`rounded-2xl border p-4 ${item.tone}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                        <p className="text-sm font-semibold">{item.title}</p>
+                      </div>
+                      <p className="mt-3 text-sm leading-6">{item.body}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500">课堂节奏</p>
+                  <h4 className="text-lg font-semibold text-slate-900">四段式进程</h4>
+                </div>
+                <Activity className="h-5 w-5 text-slate-400" />
+              </div>
+
+              <div className="space-y-4">
+                {rhythmTimeline.map((item) => (
+                  <div key={item.label}>
+                    <div className="mb-1 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">{item.label}</p>
+                        <p className="text-xs text-slate-500">{item.description}</p>
+                      </div>
+                      <span className="text-sm font-semibold text-slate-700">
+                        {item.value.toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-100">
+                      <div
+                        className={`h-2.5 rounded-full ${
+                          item.tone === "emerald"
+                            ? "bg-gradient-to-r from-emerald-500 to-green-400"
+                            : item.tone === "sky"
+                              ? "bg-gradient-to-r from-sky-500 to-cyan-400"
+                              : item.tone === "violet"
+                                ? "bg-gradient-to-r from-violet-500 to-fuchsia-400"
+                                : item.tone === "rose"
+                                  ? "bg-gradient-to-r from-rose-500 to-pink-400"
+                                  : "bg-gradient-to-r from-slate-500 to-slate-400"
+                        }`}
+                        style={{ width: `${Math.min(item.value, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -450,7 +822,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
                 ))
               ) : (
                 <div className="rounded-2xl bg-white p-4 text-sm text-slate-500 shadow-sm">
-                  当前没有明显需要重点干预的学生，课堂状态整体稳定。
+                  当前没有明显需要重点干预的学生，课堂整体状态比较稳定。
                 </div>
               )}
             </div>
@@ -475,9 +847,9 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
                 <YAxis domain={[0, 100]} tickLine={false} axisLine={false} />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="出勤率" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="抬头率" stroke="#f59e0b" strokeWidth={3} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="专注度" stroke="#10b981" strokeWidth={3} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="attendanceRate" name="出勤率" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="lookUpRate" name="抬头率" stroke="#f59e0b" strokeWidth={3} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="focusLevel" name="专注度" stroke="#10b981" strokeWidth={3} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -566,4 +938,4 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({ title = "学生表�
   );
 };
 
-export default PerformanceChart;
+export default StudentPerformanceChart;

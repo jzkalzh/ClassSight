@@ -1,5 +1,4 @@
 import prisma from "@/db/db";
-import { getCoursePerformance } from "@/server/performance-service";
 
 type ScheduleShape = {
   day?: string;
@@ -67,7 +66,50 @@ function normalizeSchedule(raw: unknown) {
   };
 }
 
-function getCourseStatusLabel(hasSession: boolean, sessionStatus?: string | null) {
+function calculateCompositeScore(metrics: {
+  avgAttendance: number;
+  avgLookUpRate: number;
+  avgFocusLevel: number;
+  avgParticipationCount: number;
+}) {
+  return Number(
+    (
+      metrics.avgAttendance * 0.3 +
+      metrics.avgLookUpRate * 0.2 +
+      metrics.avgFocusLevel * 0.35 +
+      Math.min(metrics.avgParticipationCount * 12, 100) * 0.15
+    ).toFixed(2),
+  );
+}
+
+function average(values: number[]) {
+  if (!values.length) return 0;
+  return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2));
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function sanitizeRate(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return clamp(fallback, 0, 100);
+  }
+
+  return Number(clamp(numeric, 0, 100).toFixed(2));
+}
+
+function sanitizeParticipation(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return Number(Math.max(fallback, 0).toFixed(2));
+  }
+
+  return Number(Math.max(numeric, 0).toFixed(2));
+}
+
+function getCourseStatus(hasSession: boolean, sessionStatus?: string | null) {
   if (sessionStatus === "running") {
     return {
       status: "in-progress",
@@ -78,7 +120,7 @@ function getCourseStatusLabel(hasSession: boolean, sessionStatus?: string | null
   if (hasSession) {
     return {
       status: "completed",
-      statusLabel: "已采集",
+      statusLabel: "已有数据",
     };
   }
 
@@ -95,9 +137,10 @@ export async function getTeacherDashboard(teacherId: string) {
       department: true,
       courses: {
         include: {
-          courseEnrollments: {
+          _count: {
             select: {
-              id: true,
+              courseEnrollments: true,
+              inferenceSessions: true,
             },
           },
           inferenceSessions: {
@@ -105,6 +148,9 @@ export async function getTeacherDashboard(teacherId: string) {
               startedAt: "desc",
             },
             take: 1,
+            include: {
+              classMetric: true,
+            },
           },
         },
         orderBy: {
@@ -120,8 +166,9 @@ export async function getTeacherDashboard(teacherId: string) {
 
   const courses = teacher.courses.map((course) => {
     const latestSession = course.inferenceSessions[0];
+    const latestMetric = latestSession?.classMetric;
     const { scheduleLabel, location } = normalizeSchedule(course.schedule);
-    const { status, statusLabel } = getCourseStatusLabel(Boolean(latestSession), latestSession?.status);
+    const { status, statusLabel } = getCourseStatus(Boolean(latestSession), latestSession?.status);
 
     return {
       id: course.id,
@@ -129,34 +176,35 @@ export async function getTeacherDashboard(teacherId: string) {
       code: course.code,
       scheduleLabel,
       location,
-      studentCount: course.studentCount || course.courseEnrollments.length,
-      status,
-      statusLabel,
+      studentCount: course.studentCount || course._count.courseEnrollments,
+      sessionCount: course._count.inferenceSessions,
       latestSessionAt: latestSession?.startedAt ?? null,
       latestSessionStatus: latestSession?.status ?? null,
+      status,
+      statusLabel,
+      metrics: latestMetric
+        ? {
+            avgAttendance: sanitizeRate(latestMetric.avgAttendance),
+            avgLookUpRate: sanitizeRate(latestMetric.avgLookUpRate),
+            avgFocusLevel: sanitizeRate(latestMetric.avgFocusLevel),
+            avgParticipationCount: sanitizeParticipation(latestMetric.avgParticipationCount),
+            totalStudents: latestMetric.totalStudents,
+            score: calculateCompositeScore({
+              avgAttendance: sanitizeRate(latestMetric.avgAttendance),
+              avgLookUpRate: sanitizeRate(latestMetric.avgLookUpRate),
+              avgFocusLevel: sanitizeRate(latestMetric.avgFocusLevel),
+              avgParticipationCount: sanitizeParticipation(latestMetric.avgParticipationCount),
+            }),
+          }
+        : null,
     };
   });
 
-  const currentCourse =
-    courses.find((course) => course.latestSessionStatus === "running") ??
-    [...courses].sort((a, b) => {
-      const left = a.latestSessionAt ? new Date(a.latestSessionAt).getTime() : 0;
-      const right = b.latestSessionAt ? new Date(b.latestSessionAt).getTime() : 0;
-      return right - left;
-    })[0] ??
-    null;
-
-  const performanceSourceCourseId = currentCourse?.id ?? courses[0]?.id;
-  const performance = performanceSourceCourseId
-    ? await getCoursePerformance(performanceSourceCourseId)
-    : null;
-
-  const topStudents = performance?.students.slice(0, 6) ?? [];
-  const attentionStudents =
-    performance?.students
-      .filter((student) => student.attendanceRate < 60 || student.focusLevel < 60)
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 5) ?? [];
+  const monitoredCourses = courses.filter((course) => course.metrics);
+  const scores = monitoredCourses.map((course) => course.metrics?.score ?? 0);
+  const attendances = monitoredCourses.map((course) => course.metrics?.avgAttendance ?? 0);
+  const focuses = monitoredCourses.map((course) => course.metrics?.avgFocusLevel ?? 0);
+  const interactions = monitoredCourses.map((course) => course.metrics?.avgParticipationCount ?? 0);
 
   return {
     teacher: {
@@ -166,23 +214,14 @@ export async function getTeacherDashboard(teacherId: string) {
       rank: teacher.rank || "教师",
       courseCount: courses.length,
     },
-    courseOverview: {
-      currentCourse,
-      todayCourses: courses.slice(0, 4),
-      monitoredCourseCount: courses.filter((course) => course.latestSessionAt).length,
+    overview: {
+      courseCount: courses.length,
+      monitoredCourseCount: monitoredCourses.length,
+      averageScore: average(scores),
+      averageAttendance: average(attendances),
+      averageFocusLevel: average(focuses),
+      averageParticipationCount: average(interactions),
     },
-    performance: performance
-      ? {
-          courseId: performance.course.id,
-          courseName: performance.course.name,
-          courseCode: performance.course.code,
-          session: performance.session,
-          classStats: performance.classStats,
-          attendanceSummary: performance.attendanceSummary,
-          students: performance.students,
-          topStudents,
-          attentionStudents,
-        }
-      : null,
+    courses,
   };
 }

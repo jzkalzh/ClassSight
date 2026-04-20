@@ -10,6 +10,7 @@ This document covers both:
 
 - quick deployment with Docker Compose
 - full migration of your current database to a public server
+- three-instance production deployment for teacher, student, and admin portals
 
 ## 1. Recommended Server Spec
 
@@ -93,6 +94,49 @@ If you use Nginx in front of it, point your domain to the server and proxy to `1
 An example config is provided in:
 
 - `deploy/nginx/classsight.conf.example`
+- `deploy/nginx/classsight-multi.conf.example`
+
+## 5.1 Recommended Demo And Cloud Strategy
+
+For demos and public deployment, do not use `next dev`.
+
+Use this production flow instead:
+
+```bash
+npm run build
+npm run start:teacher
+npm run start:student
+npm run start:admin
+```
+
+This avoids on-demand dev compilation when the first visitor opens a page.
+Each instance now binds to `0.0.0.0` by default, so LAN access works when you open
+the machine IP instead of `127.0.0.1`.
+
+For local network demos, visit:
+
+- `http://<your-lan-ip>:3000` teacher
+- `http://<your-lan-ip>:3001` student
+- `http://<your-lan-ip>:3002` admin
+
+## 5.2 Warm Up Key Routes Before A Demo
+
+After all three production instances are running, pre-request the key routes once:
+
+```bash
+npm run warmup
+```
+
+You can also warm only one portal:
+
+```bash
+npm run warmup:teacher
+npm run warmup:student
+npm run warmup:admin
+```
+
+This is useful right before a classroom demo or presentation because the main
+dashboard routes are already hot when you open them in the browser.
 
 ## 6. Enable HTTPS
 
@@ -113,6 +157,49 @@ After HTTPS is enabled, your public entry should be:
 ```text
 https://your-domain.com
 ```
+
+If you deploy the portals as three isolated web entries, use subdomains instead:
+
+- `teacher.your-domain.com`
+- `student.your-domain.com`
+- `admin.your-domain.com`
+
+The multi-instance Nginx sample is in:
+
+- `deploy/nginx/classsight-multi.conf.example`
+
+## 6.1 PM2 Multi-Process Example
+
+If you prefer running Next.js directly on the server instead of Docker Compose,
+you can build once and keep three production processes alive with PM2.
+
+Install PM2:
+
+```bash
+npm install -g pm2
+```
+
+Build once:
+
+```bash
+npm run build
+```
+
+Start three role-specific instances:
+
+```bash
+pm2 start deploy/pm2/ecosystem.config.cjs
+pm2 save
+```
+
+The provided PM2 file already splits the roles into:
+
+- `classsight-teacher`
+- `classsight-student`
+- `classsight-admin`
+
+It also assigns separate ports and cookie prefixes so browser sessions do not
+overwrite each other.
 
 ## 7. Move Existing Database Data
 
